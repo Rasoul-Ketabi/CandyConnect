@@ -44,6 +44,99 @@ const BtnWarn: React.FC<{ children: React.ReactNode; onClick: () => void; disabl
   <button onClick={onClick} disabled={disabled} className="px-4 py-2 rounded-xl text-sm font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors disabled:opacity-50">{children}</button>
 );
 
+// Extracted as a proper component to avoid React hooks violation
+const WireGuardConfigPanel: React.FC<{
+  cfg: CoreConfigs; saving: boolean;
+  save: (section: string, data: unknown, name: string) => Promise<void>;
+  restart: (id: string, name: string) => Promise<void>;
+}> = ({ cfg, saving, save, restart }) => {
+  const [ifaces, setIfaces] = useState(cfg.wireguard.interfaces.map(i => ({ ...i })));
+
+  useEffect(() => {
+    setIfaces(cfg.wireguard.interfaces.map(i => ({ ...i })));
+  }, [cfg.wireguard.interfaces]);
+
+  return (
+    <Card className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h3 className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2"><Shield className="w-5 h-5 text-blue-500" /> WireGuard Config</h3>
+        <button onClick={() => { const n = ifaces.length; setIfaces([...ifaces, { id: `wg${n}`, name: `wg${n}`, listen_port: 51820 + n, dns: '1.1.1.1', address: `10.${66 + n * 11}.${66 + n * 11}.1/24`, private_key: '', public_key: '', mtu: 1420, post_up: 'iptables -A FORWARD -i %i -j ACCEPT', post_down: 'iptables -D FORWARD -i %i -j ACCEPT' }]); }} className="px-3 py-1.5 rounded-lg text-xs font-bold text-orange-500 border border-orange-300 dark:border-orange-700 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors">+ Add Interface</button>
+      </div>
+      {ifaces.map((iface, idx) => (
+        <div key={iface.id} className="bg-slate-50 dark:bg-slate-700/30 rounded-xl p-4 space-y-3 border border-slate-200/50 dark:border-slate-600/50">
+          <div className="flex items-center justify-between">
+            <span className="font-bold text-sm text-orange-500">{iface.name}</span>
+            {idx > 0 && <button onClick={() => setIfaces(ifaces.filter((_, i) => i !== idx))} className="text-xs text-red-500 font-bold">Remove</button>}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div><Label>Name</Label><Input value={iface.name} onChange={e => { const u = [...ifaces]; u[idx] = { ...u[idx], name: e.target.value }; setIfaces(u); }} /></div>
+            <div><Label>Listen Port</Label><Input type="number" value={iface.listen_port} onChange={e => { const u = [...ifaces]; u[idx] = { ...u[idx], listen_port: +e.target.value }; setIfaces(u); }} /></div>
+            <div><Label>DNS</Label><Input value={iface.dns} onChange={e => { const u = [...ifaces]; u[idx] = { ...u[idx], dns: e.target.value }; setIfaces(u); }} /></div>
+            <div><Label>Address</Label><Input value={iface.address} onChange={e => { const u = [...ifaces]; u[idx] = { ...u[idx], address: e.target.value }; setIfaces(u); }} /></div>
+            <div><Label>MTU</Label><Input type="number" value={iface.mtu} onChange={e => { const u = [...ifaces]; u[idx] = { ...u[idx], mtu: +e.target.value }; setIfaces(u); }} /></div>
+            <div><Label>Public Key</Label><Input value={iface.public_key} readOnly style={{ opacity: 0.6 }} /></div>
+          </div>
+          <div><Label>PostUp</Label><Input value={iface.post_up} onChange={e => { const u = [...ifaces]; u[idx] = { ...u[idx], post_up: e.target.value }; setIfaces(u); }} /></div>
+          <div><Label>PostDown</Label><Input value={iface.post_down} onChange={e => { const u = [...ifaces]; u[idx] = { ...u[idx], post_down: e.target.value }; setIfaces(u); }} /></div>
+        </div>
+      ))}
+      <div className="border-t border-slate-200 dark:border-slate-700 pt-4 flex flex-wrap gap-3">
+        <BtnPrimary disabled={saving} onClick={() => save('wireguard', { interfaces: ifaces }, 'WireGuard')}>Save Config</BtnPrimary>
+        <BtnWarn onClick={() => restart('wireguard', 'WireGuard')}>Restart WireGuard</BtnWarn>
+      </div>
+    </Card>
+  );
+};
+
+// Extracted as a proper component to handle mutable form state correctly
+const SimpleConfigPanel: React.FC<{
+  id: string; title: string; cfg: CoreConfigs; cores: VpnCore[]; saving: boolean;
+  fields: { label: string; key: string; type?: string; options?: string[]; value: any }[];
+  toggles: { label: string; key: string; value: boolean }[];
+  save: (section: string, data: unknown, name: string) => Promise<void>;
+  restart: (id: string, name: string) => Promise<void>;
+}> = ({ id, title, cfg, cores, saving, fields, toggles, save, restart }) => {
+  const sectionKey = id as keyof CoreConfigs;
+  const [formData, setFormData] = useState<Record<string, any>>({ ...(cfg[sectionKey] as any) });
+
+  useEffect(() => {
+    setFormData({ ...(cfg[sectionKey] as any) });
+  }, [cfg, sectionKey]);
+
+  const core = cores.find(c => c.id === id);
+  const icons: any = { openvpn: Lock, ikev2: KeyRound, l2tp: Radio, dnstt: Globe, slipstream: Wind, trusttunnel: Castle };
+  const Icon = icons[id] || Circle;
+
+  return (
+    <Card className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2"><Icon className="w-5 h-5 text-slate-500" /> {title}</h3>
+        {core && <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${core.status === 'running' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'}`}>{core.status === 'running' ? 'Online' : 'Offline'}</span>}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {fields.map(f => (
+          <div key={f.key}>
+            <Label>{f.label}</Label>
+            {f.options
+              ? <Select value={formData[f.key] ?? f.value} options={f.options} onChange={e => setFormData(prev => ({ ...prev, [f.key]: e.target.value }))} />
+              : <Input type={f.type || 'text'} value={formData[f.key] ?? f.value} onChange={e => setFormData(prev => ({ ...prev, [f.key]: f.type === 'number' ? +e.target.value : e.target.value }))} />
+            }
+          </div>
+        ))}
+      </div>
+      {toggles.length > 0 && (
+        <div className="flex flex-wrap gap-4 pt-1">
+          {toggles.map(t => <Toggle key={t.key} label={t.label} checked={formData[t.key] ?? t.value} onChange={() => setFormData(prev => ({ ...prev, [t.key]: !(prev[t.key] ?? t.value) }))} />)}
+        </div>
+      )}
+      <div className="border-t border-slate-200 dark:border-slate-700 pt-4 flex flex-wrap gap-3">
+        <BtnPrimary disabled={saving} onClick={() => save(id, formData, title)}>Save Config</BtnPrimary>
+        <BtnWarn onClick={() => restart(id, title.split(' ')[0])}>Restart Service</BtnWarn>
+      </div>
+    </Card>
+  );
+};
+
 const CoreConfigsPage: React.FC = () => {
   const { notify } = useNotify();
   const [activeTab, setActiveTab] = useState('candyconnect');
@@ -145,76 +238,13 @@ const CoreConfigsPage: React.FC = () => {
     </Card>
   );
 
-  const renderWireGuard = () => {
-    const [ifaces, setIfaces] = useState(cfg.wireguard.interfaces.map(i => ({ ...i })));
-    return (
-      <Card className="space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <h3 className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2"><Shield className="w-5 h-5 text-blue-500" /> WireGuard Config</h3>
-          <button onClick={() => { const n = ifaces.length; setIfaces([...ifaces, { id: `wg${n}`, name: `wg${n}`, listen_port: 51820 + n, dns: '1.1.1.1', address: `10.${66 + n * 11}.${66 + n * 11}.1/24`, private_key: '', public_key: '', mtu: 1420, post_up: 'iptables -A FORWARD -i %i -j ACCEPT', post_down: 'iptables -D FORWARD -i %i -j ACCEPT' }]); }} className="px-3 py-1.5 rounded-lg text-xs font-bold text-orange-500 border border-orange-300 dark:border-orange-700 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors">+ Add Interface</button>
-        </div>
-        {ifaces.map((iface, idx) => (
-          <div key={iface.id} className="bg-slate-50 dark:bg-slate-700/30 rounded-xl p-4 space-y-3 border border-slate-200/50 dark:border-slate-600/50">
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-sm text-orange-500">{iface.name}</span>
-              {idx > 0 && <button onClick={() => setIfaces(ifaces.filter((_, i) => i !== idx))} className="text-xs text-red-500 font-bold">Remove</button>}
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div><Label>Name</Label><Input value={iface.name} onChange={e => { const u = [...ifaces]; u[idx] = { ...u[idx], name: e.target.value }; setIfaces(u); }} /></div>
-              <div><Label>Listen Port</Label><Input type="number" value={iface.listen_port} onChange={e => { const u = [...ifaces]; u[idx] = { ...u[idx], listen_port: +e.target.value }; setIfaces(u); }} /></div>
-              <div><Label>DNS</Label><Input value={iface.dns} onChange={e => { const u = [...ifaces]; u[idx] = { ...u[idx], dns: e.target.value }; setIfaces(u); }} /></div>
-              <div><Label>Address</Label><Input value={iface.address} onChange={e => { const u = [...ifaces]; u[idx] = { ...u[idx], address: e.target.value }; setIfaces(u); }} /></div>
-              <div><Label>MTU</Label><Input type="number" value={iface.mtu} onChange={e => { const u = [...ifaces]; u[idx] = { ...u[idx], mtu: +e.target.value }; setIfaces(u); }} /></div>
-              <div><Label>Public Key</Label><Input value={iface.public_key} readOnly style={{ opacity: 0.6 }} /></div>
-            </div>
-            <div><Label>PostUp</Label><Input value={iface.post_up} onChange={e => { const u = [...ifaces]; u[idx] = { ...u[idx], post_up: e.target.value }; setIfaces(u); }} /></div>
-            <div><Label>PostDown</Label><Input value={iface.post_down} onChange={e => { const u = [...ifaces]; u[idx] = { ...u[idx], post_down: e.target.value }; setIfaces(u); }} /></div>
-          </div>
-        ))}
-        <div className="border-t border-slate-200 dark:border-slate-700 pt-4 flex flex-wrap gap-3">
-          <BtnPrimary disabled={saving} onClick={() => save('wireguard', { interfaces: ifaces }, 'WireGuard')}>Save Config</BtnPrimary>
-          <BtnWarn onClick={() => restart('wireguard', 'WireGuard')}>Restart WireGuard</BtnWarn>
-        </div>
-      </Card>
-    );
-  };
+  const renderWireGuard = () => (
+    <WireGuardConfigPanel cfg={cfg} saving={saving} save={save} restart={restart} />
+  );
 
-  const renderSimpleConfig = (id: string, title: string, fields: { label: string; key: string; type?: string; options?: string[]; value: any }[], toggles: { label: string; key: string; value: boolean }[] = []) => {
-    const core = cores.find(c => c.id === id);
-    const icons: any = { openvpn: Lock, ikev2: KeyRound, l2tp: Radio, dnstt: Globe, slipstream: Wind, trusttunnel: Castle };
-    const Icon = icons[id] || Circle;
-    const sectionKey = id as keyof CoreConfigs;
-    const sectionData = { ...(cfg[sectionKey] as any) };
-
-    return (
-      <Card className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2"><Icon className="w-5 h-5 text-slate-500" /> {title}</h3>
-          {core && <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${core.status === 'running' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'}`}>{core.status === 'running' ? 'Online' : 'Offline'}</span>}
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {fields.map(f => (
-            <div key={f.key}>
-              <Label>{f.label}</Label>
-              {f.options
-                ? <Select defaultValue={f.value} options={f.options} onChange={e => { sectionData[f.key] = e.target.value; }} />
-                : <Input type={f.type || 'text'} defaultValue={f.value} onChange={e => { sectionData[f.key] = f.type === 'number' ? +e.target.value : e.target.value; }} />
-              }
-            </div>
-          ))}
-        </div>
-        {toggles.length > 0 && (
-          <div className="flex flex-wrap gap-4 pt-1">
-            {toggles.map(t => <Toggle key={t.key} label={t.label} checked={t.value} onChange={() => { sectionData[t.key] = !sectionData[t.key]; }} />)}
-          </div>
-        )}
-        <div className="border-t border-slate-200 dark:border-slate-700 pt-4 flex flex-wrap gap-3">
-          <BtnPrimary disabled={saving} onClick={() => save(id, sectionData, title)}>Save Config</BtnPrimary>
-          <BtnWarn onClick={() => restart(id, title.split(' ')[0])}>Restart Service</BtnWarn>
-        </div>
-      </Card>
-    );
-  };
+  const renderSimpleConfig = (id: string, title: string, fields: { label: string; key: string; type?: string; options?: string[]; value: any }[], toggles: { label: string; key: string; value: boolean }[] = []) => (
+    <SimpleConfigPanel key={id} id={id} title={title} cfg={cfg} cores={cores} saving={saving} fields={fields} toggles={toggles} save={save} restart={restart} />
+  );
 
   const renderTab = () => {
     switch (activeTab) {

@@ -92,7 +92,7 @@ async def list_clients(_=Depends(require_admin)):
 async def get_single_client(client_id: str, _=Depends(require_admin)):
     client = await get_client(client_id)
     if not client:
-        err("Client not found", 404)
+        return err("Client not found", 404)
     return ok(client)
 
 
@@ -127,7 +127,7 @@ async def create_new_client(req: CreateClientRequest, _=Depends(require_admin)):
             client = await update_client(client["id"], {"protocol_data": protocol_data})
 
     except ValueError as e:
-        err(str(e))
+        return err(str(e))
     except Exception as e:
         await add_log("WARN", "System", f"Client created but protocol setup partial: {e}")
 
@@ -148,7 +148,7 @@ async def update_existing_client(client_id: str, req: UpdateClientRequest, _=Dep
     # Get current client
     old_client = await get_client(client_id)
     if not old_client:
-        err("Client not found", 404)
+        return err("Client not found", 404)
 
     updates = {k: v for k, v in req.model_dump().items() if v is not None}
 
@@ -197,7 +197,7 @@ async def delete_existing_client(client_id: str, _=Depends(require_admin)):
             pass
     success = await delete_client(client_id)
     if not success:
-        err("Client not found", 404)
+        return err("Client not found", 404)
     return ok(None, "Client deleted")
 
 
@@ -225,7 +225,7 @@ async def list_cores(_=Depends(require_admin)):
 async def start_core(core_id: str, _=Depends(require_admin)):
     success = await protocol_manager.start_protocol(core_id)
     if not success:
-        err(f"Failed to start {core_id}. Check logs for details.")
+        return err(f"Failed to start {core_id}. Check logs for details.")
     return ok(None, f"{core_id} started successfully")
 
 
@@ -233,7 +233,7 @@ async def start_core(core_id: str, _=Depends(require_admin)):
 async def stop_core(core_id: str, _=Depends(require_admin)):
     success = await protocol_manager.stop_protocol(core_id)
     if not success:
-        err(f"Failed to stop {core_id}")
+        return err(f"Failed to stop {core_id}")
     return ok(None, f"{core_id} stopped successfully")
 
 
@@ -241,7 +241,7 @@ async def stop_core(core_id: str, _=Depends(require_admin)):
 async def restart_core(core_id: str, _=Depends(require_admin)):
     success = await protocol_manager.restart_protocol(core_id)
     if not success:
-        err(f"Failed to restart {core_id}")
+        return err(f"Failed to restart {core_id}")
     return ok(None, f"{core_id} restarted successfully")
 
 
@@ -249,7 +249,7 @@ async def restart_core(core_id: str, _=Depends(require_admin)):
 async def install_core(core_id: str, _=Depends(require_admin)):
     success = await protocol_manager.install_protocol(core_id)
     if not success:
-        err(f"Failed to install {core_id}. Check logs for details.")
+        return err(f"Failed to install {core_id}. Check logs for details.")
     return ok(None, f"{core_id} installed successfully")
 
 
@@ -267,7 +267,7 @@ async def get_all_configs(_=Depends(require_admin)):
 async def get_section_config(section: str, _=Depends(require_admin)):
     config = await get_core_config(section)
     if config is None:
-        err(f"Config section '{section}' not found", 404)
+        return err(f"Config section '{section}' not found", 404)
     return ok(config)
 
 
@@ -308,10 +308,10 @@ async def update_panel(req: UpdatePanelRequest, _=Depends(require_admin)):
     if "panel_port" in updates:
         port = updates["panel_port"]
         if port < 1 or port > 65535:
-            err("Port must be between 1 and 65535")
+            return err("Port must be between 1 and 65535")
     if "panel_path" in updates:
         if not updates["panel_path"].startswith("/"):
-            err("Path must start with /")
+            return err("Path must start with /")
     await update_panel_config(updates)
     await add_log("INFO", "System", f"Panel config updated: {updates}")
     return ok(None, "Panel configuration saved")
@@ -325,12 +325,12 @@ class ChangePasswordRequest(BaseModel):
 @router.put("/panel/password")
 async def panel_change_password(req: ChangePasswordRequest, _=Depends(require_admin)):
     if req.new_password != req.confirm_password:
-        err("Passwords do not match")
+        return err("Passwords do not match")
     if len(req.new_password) < 8:
-        err("Password must be at least 8 characters")
+        return err("Password must be at least 8 characters")
     success = await change_admin_password(req.current_password, req.new_password)
     if not success:
-        err("Current password is incorrect")
+        return err("Current password is incorrect")
     await add_log("INFO", "System", "Admin password changed")
     return ok(None, "Password changed successfully")
 

@@ -10,26 +10,22 @@ const WindowControls: React.FC<WindowControlsProps> = ({ onMinimize, onClose }) 
     if (onMinimize) {
       onMinimize();
     }
-    // @ts-ignore
-    if (window.electron) {
-      // @ts-ignore
-      window.electron.minimize();
-    } else {
+    import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
+      getCurrentWindow().minimize();
+    }).catch(() => {
       console.log("Mock: Window Minimize");
-    }
+    });
   };
 
   const handleClose = () => {
     if (onClose) {
       onClose();
     }
-    // @ts-ignore
-    if (window.electron) {
-      // @ts-ignore
-      window.electron.hide();
-    } else {
-      console.log("Mock: Window Hide");
-    }
+    import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
+      getCurrentWindow().close();
+    }).catch(() => {
+      console.log("Mock: Window Close");
+    });
   };
 
 

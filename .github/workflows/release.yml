@@ -105,20 +105,50 @@ jobs:
         with:
           ndk-version: r26d
       - name: install frontend dependencies
-        run: npm install # Already present, ensures client's package.json dependencies are installed
+        run: npm install
         working-directory: ./client
-      - name: Build Frontend
-        run: npm run build # Builds the frontend as specified in tauri.conf.json
+      - name: Install Tauri CLI
+        run: npx @tauri-apps/cli --version
+        working-directory: ./client
+      - name: Initialize Android project
+        run: npx tauri android init
         working-directory: ./client
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           JAVA_HOME: ${{ steps.setup-java.outputs.java-home }}
-      - name: Build Android App
-        run: cargo tauri build --target aarch64-linux-android # Builds the Android app using Tauri v2 command
-        working-directory: ./client/src-tauri
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+      - name: Build Android APK
+        run: npx tauri android build --apk
+        working-directory: ./client
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           JAVA_HOME: ${{ steps.setup-java.outputs.java-home }}
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+      - name: Sign APK with debug key
+        run: |
+          # Find the unsigned APK
+          APK_PATH=$(find client/src-tauri/gen/android -name "*.apk" -type f | head -1)
+          if [ -z "$APK_PATH" ]; then
+            echo "No APK found, trying AAB..."
+            APK_PATH=$(find client/src-tauri/gen/android -name "*.aab" -type f | head -1)
+          fi
+          if [ -n "$APK_PATH" ]; then
+            echo "Found artifact: ${APK_PATH}"
+            # Use zipalign and apksigner if available
+            BUILD_TOOLS=$(ls -d ${ANDROID_HOME}/build-tools/*/ 2>/dev/null | tail -1)
+            if [ -n "$BUILD_TOOLS" ] && [ -f "${BUILD_TOOLS}zipalign" ]; then
+              ALIGNED_APK="${APK_PATH%.apk}-aligned.apk"
+              ${BUILD_TOOLS}zipalign -v 4 "$APK_PATH" "$ALIGNED_APK" && mv "$ALIGNED_APK" "$APK_PATH"
+            fi
+            if [ -n "$BUILD_TOOLS" ] && [ -f "${BUILD_TOOLS}apksigner" ]; then
+              # Generate a debug keystore if not present
+              if [ ! -f ~/.android/debug.keystore ]; then
+                mkdir -p ~/.android
+                keytool -genkey -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Debug,O=Android,C=US"
+              fi
+              ${BUILD_TOOLS}apksigner sign --ks ~/.android/debug.keystore --ks-pass pass:android --key-pass pass:android "$APK_PATH"
+            fi
+          fi
       - name: Find APK files
         id: find_apk
         run: |

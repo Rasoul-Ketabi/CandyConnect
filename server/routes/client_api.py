@@ -77,7 +77,7 @@ async def client_login(req: ClientLoginRequest, request: Request):
 async def get_account(payload=Depends(require_client)):
     client = await get_client_by_username(payload["sub"])
     if not client:
-        err("Account not found", 404)
+        return err("Account not found", 404)
     return ok(_format_client_account(client))
 
 
@@ -89,7 +89,7 @@ async def get_account(payload=Depends(require_client)):
 async def get_protocols(payload=Depends(require_client)):
     client = await get_client_by_username(payload["sub"])
     if not client:
-        err("Account not found", 404)
+        return err("Account not found", 404)
 
     cores = await protocol_manager.get_all_cores_info()
     user_protocols = client.get("protocols", {})
@@ -121,7 +121,7 @@ async def get_client_vpn_configs(payload=Depends(require_client)):
     """Get all VPN protocol connection configs for the authenticated client."""
     client = await get_client_by_username(payload["sub"])
     if not client:
-        err("Account not found", 404)
+        return err("Account not found", 404)
 
     server = await get_server_info()
     server_ip = server["ip"]
@@ -142,16 +142,16 @@ async def get_client_protocol_config(protocol_id: str, payload=Depends(require_c
     """Get VPN config for a specific protocol."""
     client = await get_client_by_username(payload["sub"])
     if not client:
-        err("Account not found", 404)
+        return err("Account not found", 404)
 
     user_protocols = client.get("protocols", {})
     if not user_protocols.get(protocol_id):
-        err(f"You don't have access to {protocol_id}", 403)
+        return err(f"You don't have access to {protocol_id}", 403)
 
     server = await get_server_info()
     proto = protocol_manager.get_protocol(protocol_id)
     if not proto:
-        err(f"Protocol {protocol_id} not available", 404)
+        return err(f"Protocol {protocol_id} not available", 404)
 
     protocol_data = client.get("protocol_data", {}).get(protocol_id, {})
     config = await proto.get_client_config(client["username"], server["ip"], protocol_data)
@@ -170,7 +170,7 @@ async def report_connect(req: ConnectRequest, request: Request, payload=Depends(
     """Client reports it connected to a protocol (for tracking)."""
     client = await get_client_by_username(payload["sub"])
     if not client:
-        err("Account not found", 404)
+        return err("Account not found", 404)
 
     client_ip = request.client.host if request.client else "unknown"
     await record_client_connection(client["id"], client_ip, req.protocol)
@@ -188,7 +188,7 @@ async def report_traffic(req: TrafficReport, payload=Depends(require_client)):
     from database import update_client_traffic
     client = await get_client_by_username(payload["sub"])
     if not client:
-        err("Account not found", 404)
+        return err("Account not found", 404)
 
     await update_client_traffic(client["id"], req.protocol, req.bytes_used)
     return ok(None, "Traffic recorded")
