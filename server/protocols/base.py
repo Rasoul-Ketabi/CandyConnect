@@ -106,11 +106,11 @@ class BaseProtocol:
         """Add a client to this protocol. Returns client config data."""
         raise NotImplementedError
 
-    async def remove_client(self, username: str):
+    async def remove_client(self, username: str, protocol_data: dict):
         """Remove a client from this protocol."""
         raise NotImplementedError
 
-    async def get_client_config(self, username: str, server_ip: str) -> dict:
+    async def get_client_config(self, username: str, server_ip: str, protocol_data: dict) -> dict:
         """Get client connection config for this protocol."""
         return {}
 

@@ -190,6 +190,24 @@ function addLog(level: string, message: string) {
   if (_logs.length > 500) _logs.splice(0, _logs.length - 500);
 }
 
+function mapAccount(account: any): ClientAccount {
+  return {
+    username: account.username,
+    comment: account.comment,
+    enabled: account.enabled,
+    trafficLimit: account.traffic_limit,
+    trafficUsed: account.traffic_used,
+    timeLimit: account.time_limit,
+    timeUsed: account.time_used,
+    createdAt: account.created_at,
+    expiresAt: account.expires_at,
+    enabledProtocols: account.protocols,
+    lastConnectedIP: account.last_connected_ip || '',
+    lastConnectedTime: account.last_connected_time || '',
+    connectionHistory: account.connection_history || [],
+  };
+}
+
 // ── Public API ──
 
 export const Login = async (credentials: LoginCredentials): Promise<{
@@ -216,14 +234,14 @@ export const Login = async (credentials: LoginCredentials): Promise<{
 
     _token = data.token;
     _serverInfo = data.server_info;
-    _account = data.account;
+    _account = mapAccount(data.account);
 
     addLog('info', `Authenticated as ${credentials.username} on ${_serverUrl}`);
 
     return {
       success: true,
       serverInfo: _serverInfo!,
-      account: _account! as any,
+      account: _account!,
     };
   } catch (e: any) {
     addLog('error', `Connection failed: ${e.message}`);
@@ -262,21 +280,7 @@ export const GetAccountInfo = async (): Promise<ClientAccount | null> => {
   if (!_token) return null;
   try {
     const account = await apiRequest<any>('GET', '/account');
-    _account = {
-      username: account.username,
-      comment: account.comment,
-      enabled: account.enabled,
-      trafficLimit: account.traffic_limit,
-      trafficUsed: account.traffic_used,
-      timeLimit: account.time_limit,
-      timeUsed: account.time_used,
-      createdAt: account.created_at,
-      expiresAt: account.expires_at,
-      enabledProtocols: account.protocols,
-      lastConnectedIP: account.last_connected_ip || '',
-      lastConnectedTime: account.last_connected_time || '',
-      connectionHistory: account.connection_history || [],
-    };
+    _account = mapAccount(account);
     return _account;
   } catch (e: any) {
     addLog('error', `Failed to get account: ${e.message}`);

@@ -159,6 +159,29 @@ class OpenVPNProtocol(BaseProtocol):
         except ValueError:
             return 0
 
+    async def get_traffic(self) -> dict:
+        """Get total traffic from OpenVPN status log."""
+        total_in = 0
+        total_out = 0
+        try:
+            status_file = "/var/log/openvpn/openvpn-status.log"
+            if not os.path.exists(status_file):
+                status_file = "/etc/openvpn/server/openvpn-status.log"
+
+            rc, out, _ = await self._run_cmd(f"sudo cat {status_file}", check=False)
+            if rc == 0:
+                for line in out.split("\n"):
+                    if line.startswith("TCP/UDP read bytes,"):
+                        total_in = int(line.split(",")[1])
+                    elif line.startswith("TCP/UDP write bytes,"):
+                        total_out = int(line.split(",")[1])
+        except Exception:
+            pass
+        return {
+            "in": round(total_in / (1024 ** 3), 2),
+            "out": round(total_out / (1024 ** 3), 2)
+        }
+
     async def add_client(self, username: str, client_data: dict) -> dict:
         """Generate client certificate and return .ovpn config data."""
         # Generate client cert
@@ -168,7 +191,7 @@ class OpenVPNProtocol(BaseProtocol):
         )
         return {"cert_generated": True, "username": username}
 
-    async def remove_client(self, username: str):
+    async def remove_client(self, username: str, protocol_data: dict):
         await self._run_cmd(
             f"cd {self.EASYRSA_DIR} && EASYRSA_BATCH=1 ./easyrsa --batch revoke {username}",
             check=False,
@@ -178,7 +201,7 @@ class OpenVPNProtocol(BaseProtocol):
             check=False,
         )
 
-    async def get_client_config(self, username: str, server_ip: str) -> dict:
+    async def get_client_config(self, username: str, server_ip: str, protocol_data: dict) -> dict:
         config = await get_core_config("openvpn")
         if not config:
             return {}

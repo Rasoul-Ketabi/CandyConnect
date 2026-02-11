@@ -159,8 +159,8 @@ class V2RayProtocol(BaseProtocol):
 
         return {"uuid": client_uuid}
 
-    async def remove_client(self, username: str):
-        client_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, username))
+    async def remove_client(self, username: str, protocol_data: dict):
+        client_uuid = protocol_data.get("uuid") or str(uuid.uuid5(uuid.NAMESPACE_DNS, username))
         config = await get_core_config("v2ray")
         if not config:
             return
@@ -179,8 +179,8 @@ class V2RayProtocol(BaseProtocol):
         except json.JSONDecodeError:
             pass
 
-    async def get_client_config(self, username: str, server_ip: str) -> dict:
-        client_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, username))
+    async def get_client_config(self, username: str, server_ip: str, protocol_data: dict) -> dict:
+        client_uuid = protocol_data.get("uuid") or str(uuid.uuid5(uuid.NAMESPACE_DNS, username))
         config = await get_core_config("v2ray")
         if not config:
             return {}

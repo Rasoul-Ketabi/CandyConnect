@@ -291,6 +291,7 @@ async def create_client(data: dict) -> dict:
         "protocols": data.get("protocols", {p: True for p in [
             "v2ray", "wireguard", "openvpn", "ikev2", "l2tp", "dnstt", "slipstream", "trusttunnel"
         ]}),
+        "protocol_data": data.get("protocol_data", {}),
         "last_connected_ip": None,
         "last_connected_time": None,
         "connection_history": [],
@@ -311,7 +312,7 @@ async def update_client(client_id: str, updates: dict) -> Optional[dict]:
         return None
     client = json.loads(raw)
 
-    for key in ["password", "comment", "enabled", "group", "traffic_limit", "time_limit", "protocols"]:
+    for key in ["password", "comment", "enabled", "group", "traffic_limit", "time_limit", "protocols", "protocol_data"]:
         if key in updates:
             client[key] = updates[key]
 
