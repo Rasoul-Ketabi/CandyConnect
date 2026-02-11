@@ -184,14 +184,14 @@ class IKEv2Protocol(BaseProtocol):
 
         return {"cert_generated": True, "username": username}
 
-    async def remove_client(self, username: str):
+    async def remove_client(self, username: str, protocol_data: dict):
         for ext in ["key.pem", "cert.pem"]:
             path = os.path.join(self.IPSEC_DIR, "private" if "key" in ext else "certs", f"{username}-{ext}")
             await self._run_cmd(f"sudo rm -f {path}", check=False)
         await self._run_cmd(f"sudo rm -f {self.IPSEC_DIR}/{username}.p12", check=False)
         await self._run_cmd(f"sudo sed -i '/{username}/d' /etc/ipsec.secrets", check=False)
 
-    async def get_client_config(self, username: str, server_ip: str) -> dict:
+    async def get_client_config(self, username: str, server_ip: str, protocol_data: dict) -> dict:
         config = await get_core_config("ikev2")
         if not config:
             return {}

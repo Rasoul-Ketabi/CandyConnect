@@ -116,21 +116,48 @@ class WireGuardProtocol(BaseProtocol):
             return len(out.strip().split("\n"))
         return 0
 
-    async def add_client(self, username: str, client_data: dict) -> dict:
-        """Generate WireGuard keys for a client and add peer to config."""
-        # Generate client keys
-        rc, privkey, _ = await self._run_cmd("wg genkey")
-        if rc != 0:
-            raise RuntimeError("Failed to generate WireGuard private key")
+    async def get_traffic(self) -> dict:
+        """Get total traffic for all WireGuard interfaces."""
+        total_rx = 0
+        total_tx = 0
+        try:
+            rc, out, _ = await self._run_cmd("sudo wg show all dump", check=False)
+            if rc == 0 and out:
+                for line in out.strip().split("\n"):
+                    parts = line.split("\t")
+                    if parts[0] == "peer":
+                        # peer public_key preshared_key endpoint allowed_ips latest_handshake transfer_rx transfer_tx persistent_keepalive
+                        if len(parts) >= 8:
+                            total_rx += int(parts[6])
+                            total_tx += int(parts[7])
+        except Exception:
+            pass
 
-        proc = await asyncio.create_subprocess_shell(
-            "wg pubkey",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        pubkey_out, _ = await proc.communicate(privkey.encode())
-        pubkey = pubkey_out.decode().strip()
+        return {
+            "in": round(total_rx / (1024 ** 3), 2),
+            "out": round(total_tx / (1024 ** 3), 2)
+        }
+
+    async def add_client(self, username: str, client_data: dict) -> dict:
+        """Generate/reuse WireGuard keys for a client and add peer to config."""
+        privkey = client_data.get("private_key")
+        pubkey = client_data.get("public_key")
+        address = client_data.get("address")
+
+        if not privkey or not pubkey:
+            # Generate new client keys
+            rc, privkey, _ = await self._run_cmd("wg genkey")
+            if rc != 0:
+                raise RuntimeError("Failed to generate WireGuard private key")
+
+            proc = await asyncio.create_subprocess_shell(
+                "wg pubkey",
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            pubkey_out, _ = await proc.communicate(privkey.encode())
+            pubkey = pubkey_out.decode().strip()
 
         # Get server config
         config = await get_core_config("wireguard")
@@ -138,42 +165,77 @@ class WireGuardProtocol(BaseProtocol):
             raise RuntimeError("No WireGuard interfaces configured")
 
         iface = config["interfaces"][0]
-        # Assign IP
-        base_ip = iface["address"].split("/")[0].rsplit(".", 1)[0]
-        # Find next available IP (simple approach)
-        next_ip = f"{base_ip}.{hash(username) % 200 + 2}"
+
+        if not address:
+            # Assign IP
+            base_ip = iface["address"].split("/")[0].rsplit(".", 1)[0]
+            # Simple unique IP generation based on username (deterministic)
+            import hashlib
+            h = int(hashlib.md5(username.encode()).hexdigest(), 16)
+            next_ip = f"{base_ip}.{h % 250 + 2}"
+            address = f"{next_ip}/32"
 
         # Add peer to interface
         await self._run_cmd(
-            f"sudo wg set {iface['name']} peer {pubkey} allowed-ips {next_ip}/32",
+            f"sudo wg set {iface['name']} peer {pubkey} allowed-ips {address}",
             check=False,
         )
 
         return {
             "private_key": privkey,
             "public_key": pubkey,
-            "address": f"{next_ip}/32",
+            "address": address,
             "dns": iface.get("dns", "1.1.1.1"),
             "endpoint_port": iface.get("listen_port", 51820),
             "server_public_key": iface.get("public_key", ""),
         }
 
-    async def remove_client(self, username: str):
-        # Would need to track pubkey -> username mapping
-        pass
+    async def remove_client(self, username: str, protocol_data: dict):
+        """Remove WireGuard peer for a client."""
+        pubkey = protocol_data.get("public_key")
+        if not pubkey:
+            return
 
-    async def get_client_config(self, username: str, server_ip: str) -> dict:
+        config = await get_core_config("wireguard")
+        if config and config.get("interfaces"):
+            iface = config["interfaces"][0]
+            await self._run_cmd(f"sudo wg set {iface['name']} peer {pubkey} remove", check=False)
+
+    async def get_client_config(self, username: str, server_ip: str, protocol_data: dict) -> dict:
         config = await get_core_config("wireguard")
         if not config or not config.get("interfaces"):
             return {}
         iface = config["interfaces"][0]
+
+        # Build full WG config string for convenience
+        address = protocol_data.get("address", "")
+        privkey = protocol_data.get("private_key", "")
+        pubkey = iface.get("public_key", "")
+        port = iface.get("listen_port", 51820)
+
+        wg_config = f"""[Interface]
+PrivateKey = {privkey}
+Address = {address}
+DNS = {iface.get('dns', '1.1.1.1')}
+MTU = {iface.get('mtu', 1420)}
+
+[Peer]
+PublicKey = {pubkey}
+Endpoint = {server_ip}:{port}
+AllowedIPs = 0.0.0.0/0, ::/0
+PersistentKeepalive = 25
+"""
+
         return {
             "type": "wireguard",
             "server": server_ip,
-            "port": iface.get("listen_port", 51820),
-            "server_public_key": iface.get("public_key", ""),
+            "port": port,
+            "server_public_key": pubkey,
+            "client_private_key": privkey,
+            "client_address": address,
             "dns": iface.get("dns", "1.1.1.1"),
             "mtu": iface.get("mtu", 1420),
+            "wg_config": wg_config,
         }
 
     async def _write_config(self, iface: dict):

@@ -112,18 +112,25 @@ class CreateClientRequest(BaseModel):
 @router.post("/clients")
 async def create_new_client(req: CreateClientRequest, _=Depends(require_admin)):
     try:
+        # 1. Create client in DB
         client = await create_client(req.model_dump())
-    except ValueError as e:
-        err(str(e))
-    # Add client to VPN protocol cores
-    try:
-        await protocol_manager.add_client_to_protocols(
+
+        # 2. Add client to VPN protocol cores and get generated data
+        protocol_data = await protocol_manager.add_client_to_protocols(
             req.username,
             {"password": req.password},
             req.protocols,
         )
+
+        # 3. Update client with protocol-specific data (keys, etc)
+        if protocol_data:
+            client = await update_client(client["id"], {"protocol_data": protocol_data})
+
+    except ValueError as e:
+        err(str(e))
     except Exception as e:
         await add_log("WARN", "System", f"Client created but protocol setup partial: {e}")
+
     return ok(client, "Client created")
 
 
@@ -138,10 +145,44 @@ class UpdateClientRequest(BaseModel):
 
 @router.put("/clients/{client_id}")
 async def update_existing_client(client_id: str, req: UpdateClientRequest, _=Depends(require_admin)):
-    updates = {k: v for k, v in req.model_dump().items() if v is not None}
-    client = await update_client(client_id, updates)
-    if not client:
+    # Get current client
+    old_client = await get_client(client_id)
+    if not old_client:
         err("Client not found", 404)
+
+    updates = {k: v for k, v in req.model_dump().items() if v is not None}
+
+    # Check if we need to sync protocols
+    resync_needed = False
+    if "password" in updates and updates["password"] != old_client["password"]:
+        resync_needed = True
+    if "protocols" in updates and updates["protocols"] != old_client["protocols"]:
+        resync_needed = True
+    if "enabled" in updates and updates["enabled"] != old_client["enabled"]:
+        resync_needed = True
+
+    client = await update_client(client_id, updates)
+
+    if resync_needed:
+        try:
+            # We remove and re-add to protocols to ensure configuration matches DB
+            await protocol_manager.remove_client_from_protocols(old_client)
+            if client["enabled"]:
+                # Pass existing protocol_data so protocols can reuse keys/etc if they support it
+                protocol_data = await protocol_manager.add_client_to_protocols(
+                    client["username"],
+                    {"password": client["password"]},
+                    client["protocols"],
+                    existing_data=old_client.get("protocol_data", {})
+                )
+                if protocol_data:
+                    # Merge protocol data
+                    current_data = client.get("protocol_data", {})
+                    current_data.update(protocol_data)
+                    client = await update_client(client_id, {"protocol_data": current_data})
+        except Exception as e:
+            await add_log("WARN", "System", f"Client updated but protocol sync failed: {e}")
+
     return ok(client, "Client updated")
 
 
@@ -151,7 +192,7 @@ async def delete_existing_client(client_id: str, _=Depends(require_admin)):
     client = await get_client(client_id)
     if client:
         try:
-            await protocol_manager.remove_client_from_protocols(client["username"])
+            await protocol_manager.remove_client_from_protocols(client)
         except Exception:
             pass
     success = await delete_client(client_id)

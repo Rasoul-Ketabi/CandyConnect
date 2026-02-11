@@ -145,11 +145,11 @@ class DNSTTProtocol(BaseProtocol):
 
         return {"ssh_username": ssh_user, "ssh_password": password}
 
-    async def remove_client(self, username: str):
-        ssh_user = f"dnstt_{username}"
+    async def remove_client(self, username: str, protocol_data: dict):
+        ssh_user = protocol_data.get("ssh_username") or f"dnstt_{username}"
         await self._run_cmd(f"sudo userdel -r {ssh_user} 2>/dev/null || true", check=False)
 
-    async def get_client_config(self, username: str, server_ip: str) -> dict:
+    async def get_client_config(self, username: str, server_ip: str, protocol_data: dict) -> dict:
         config = await get_core_config("dnstt")
         if not config:
             return {}
@@ -159,7 +159,8 @@ class DNSTTProtocol(BaseProtocol):
             "domain": config.get("domain", ""),
             "port": config.get("listen_port", 53),
             "public_key": config.get("public_key", ""),
-            "ssh_username": f"dnstt_{username}",
+            "ssh_username": protocol_data.get("ssh_username") or f"dnstt_{username}",
+            "ssh_password": protocol_data.get("ssh_password"),
         }
 
     def _gen_password(self, length: int = 16) -> str:

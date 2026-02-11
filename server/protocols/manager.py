@@ -12,6 +12,8 @@ from protocols.openvpn import OpenVPNProtocol
 from protocols.ikev2 import IKEv2Protocol
 from protocols.l2tp import L2TPProtocol
 from protocols.dnstt import DNSTTProtocol
+from protocols.slipstream import SlipStreamProtocol
+from protocols.trusttunnel import TrustTunnelProtocol
 from database import (
     get_all_core_statuses, get_core_status, set_core_status,
     add_log, get_core_config, get_all_clients,
@@ -43,7 +45,8 @@ class ProtocolManager:
             "ikev2": IKEv2Protocol(),
             "l2tp": L2TPProtocol(),
             "dnstt": DNSTTProtocol(),
-            # slipstream and trusttunnel: placeholder (not needed now per prompt)
+            "slipstream": SlipStreamProtocol(),
+            "trusttunnel": TrustTunnelProtocol(),
         }
         self._traffic_cache: dict[str, dict] = {}
 
@@ -152,36 +155,50 @@ class ProtocolManager:
 
         return cores
 
-    async def add_client_to_protocols(self, username: str, client_data: dict, protocols: dict):
-        """Add a client to all enabled protocols."""
+    async def add_client_to_protocols(self, username: str, client_data: dict, protocols: dict, existing_data: dict = None) -> dict:
+        """Add a client to all enabled protocols. Returns dict of protocol-specific data."""
+        results = {}
+        if existing_data is None: existing_data = {}
         for proto_id, enabled in protocols.items():
             if not enabled:
                 continue
             proto = self.get_protocol(proto_id)
             if proto:
                 try:
-                    await proto.add_client(username, client_data)
+                    # Merge existing protocol data if available
+                    proto_existing = existing_data.get(proto_id, {})
+                    results[proto_id] = await proto.add_client(username, {**client_data, **proto_existing})
                 except Exception as e:
                     logger.warning(f"Failed to add {username} to {proto_id}: {e}")
+        return results
 
-    async def remove_client_from_protocols(self, username: str):
+    async def remove_client_from_protocols(self, client_or_username):
         """Remove a client from all protocols."""
+        if isinstance(client_or_username, dict):
+            username = client_or_username["username"]
+            protocol_data = client_or_username.get("protocol_data", {})
+        else:
+            username = client_or_username
+            protocol_data = {}
+
         for proto_id, proto in self._protocols.items():
             try:
-                await proto.remove_client(username)
+                await proto.remove_client(username, protocol_data.get(proto_id, {}))
             except Exception as e:
                 logger.warning(f"Failed to remove {username} from {proto_id}: {e}")
 
-    async def get_client_configs(self, username: str, server_ip: str, protocols: dict) -> dict:
+    async def get_client_configs(self, username: str, server_ip: str, protocols: dict, protocol_data: dict = None) -> dict:
         """Get all protocol configs for a client."""
         configs = {}
+        if protocol_data is None: protocol_data = {}
         for proto_id, enabled in protocols.items():
             if not enabled:
                 continue
             proto = self.get_protocol(proto_id)
             if proto:
                 try:
-                    cfg = await proto.get_client_config(username, server_ip)
+                    proto_data = protocol_data.get(proto_id, {})
+                    cfg = await proto.get_client_config(username, server_ip, proto_data)
                     if cfg:
                         configs[proto_id] = cfg
                 except Exception as e:
@@ -189,28 +206,22 @@ class ProtocolManager:
         return configs
 
     async def update_traffic_cache(self):
-        """Periodically update traffic statistics from system."""
+        """Periodically update traffic statistics from VPN cores."""
         try:
-            net = psutil.net_io_counters()
-            # This is total system traffic - in production you'd use per-interface
-            # or per-process tracking. For now we distribute proportionally.
-            total_in_gb = net.bytes_recv / (1024 ** 3)
-            total_out_gb = net.bytes_sent / (1024 ** 3)
+            new_cache = {}
+            for proto_id, proto in self._protocols.items():
+                try:
+                    new_cache[proto_id] = await proto.get_traffic()
+                except Exception as e:
+                    logger.warning(f"Error getting traffic for {proto_id}: {e}")
+                    new_cache[proto_id] = self._traffic_cache.get(proto_id, {"in": 0, "out": 0})
 
-            statuses = await get_all_core_statuses()
-            running = [pid for pid, s in statuses.items() if s.get("status") == "running"]
-            if running:
-                share_in = total_in_gb / len(running)
-                share_out = total_out_gb / len(running)
-                for proto_id in PROTOCOL_META:
-                    if proto_id in [p for p in running]:
-                        self._traffic_cache[proto_id] = {
-                            "in": round(share_in, 1),
-                            "out": round(share_out, 1),
-                        }
-                    else:
-                        prev = self._traffic_cache.get(proto_id, {"in": 0, "out": 0})
-                        self._traffic_cache[proto_id] = prev
+            # Fill in missing (planned) protocols with empty stats if not already there
+            for proto_id in PROTOCOL_META:
+                if proto_id not in new_cache:
+                    new_cache[proto_id] = self._traffic_cache.get(proto_id, {"in": 0, "out": 0})
+
+            self._traffic_cache = new_cache
         except Exception as e:
             logger.warning(f"Traffic cache update error: {e}")
 

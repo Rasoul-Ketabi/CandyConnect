@@ -131,6 +131,7 @@ async def get_client_vpn_configs(payload=Depends(require_client)):
         client["username"],
         server_ip,
         user_protocols,
+        client.get("protocol_data", {}),
     )
 
     return ok(configs)
@@ -152,7 +153,8 @@ async def get_client_protocol_config(protocol_id: str, payload=Depends(require_c
     if not proto:
         err(f"Protocol {protocol_id} not available", 404)
 
-    config = await proto.get_client_config(client["username"], server["ip"])
+    protocol_data = client.get("protocol_data", {}).get(protocol_id, {})
+    config = await proto.get_client_config(client["username"], server["ip"], protocol_data)
     return ok(config)
 
 

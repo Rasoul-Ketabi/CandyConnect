@@ -119,11 +119,18 @@ app.include_router(client_router, prefix="/client-api")
 
 PANEL_DIST = os.path.join(os.path.dirname(__file__), "..", "web-panel", "dist")
 if os.path.isdir(PANEL_DIST):
-    app.mount("/panel-assets", StaticFiles(directory=PANEL_DIST), name="panel-static")
+    # Mount assets at the same path Vite expects them
+    app.mount("/candyconnect/assets", StaticFiles(directory=os.path.join(PANEL_DIST, "assets")), name="panel-assets")
 
     @app.get("/candyconnect/{rest_of_path:path}")
     @app.get("/candyconnect")
     async def serve_panel(rest_of_path: str = ""):
+        # Check if the requested path is actually a file (like favicon or manifest)
+        file_path = os.path.join(PANEL_DIST, rest_of_path)
+        if rest_of_path and os.path.isfile(file_path):
+            return FileResponse(file_path)
+
+        # Otherwise return index.html for SPA routing
         index = os.path.join(PANEL_DIST, "index.html")
         if os.path.exists(index):
             return FileResponse(index)
