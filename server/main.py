@@ -1,0 +1,148 @@
+"""
+CandyConnect Server - Main Application
+FastAPI backend serving both web panel and client APIs.
+"""
+import asyncio, os, sys, logging, time
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+
+from config import PANEL_PORT, DATA_DIR, CORE_DIR, BACKUP_DIR, LOG_DIR
+from database import init_db, close_redis, add_log
+from protocols.manager import protocol_manager
+
+# ── Logging ──
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+logger = logging.getLogger("candyconnect")
+
+
+# ── Background Tasks ──
+
+async def traffic_updater():
+    """Periodically update traffic cache."""
+    while True:
+        try:
+            await protocol_manager.update_traffic_cache()
+        except Exception as e:
+            logger.warning(f"Traffic updater error: {e}")
+        await asyncio.sleep(30)
+
+
+async def status_checker():
+    """Periodically verify core statuses match reality."""
+    while True:
+        try:
+            cores = await protocol_manager.get_all_cores_info()
+            # Status verification happens inside get_all_cores_info
+        except Exception as e:
+            logger.warning(f"Status checker error: {e}")
+        await asyncio.sleep(60)
+
+
+# ── App Lifecycle ──
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    for d in [DATA_DIR, CORE_DIR, BACKUP_DIR, LOG_DIR]:
+        os.makedirs(d, exist_ok=True)
+
+    await init_db()
+    await add_log("INFO", "System", "CandyConnect server started")
+    logger.info("CandyConnect server started")
+
+    # Start background tasks
+    tasks = [
+        asyncio.create_task(traffic_updater()),
+        asyncio.create_task(status_checker()),
+    ]
+
+    yield
+
+    # Shutdown
+    for t in tasks:
+        t.cancel()
+    await add_log("INFO", "System", "CandyConnect server shutting down")
+    await close_redis()
+
+
+# ── FastAPI App ──
+
+app = FastAPI(
+    title="CandyConnect Server",
+    version="1.4.2",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Return all errors in {success, message} format for frontend compatibility."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"success": False, "message": str(exc.detail)},
+    )
+
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled error: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"success": False, "message": "Internal server error"},
+    )
+
+# ── Register API Routers ──
+
+from routes.panel_api import router as panel_router
+from routes.client_api import router as client_router
+
+app.include_router(panel_router, prefix="/api")
+app.include_router(client_router, prefix="/client-api")
+
+# ── Serve Web Panel Static Files ──
+
+PANEL_DIST = os.path.join(os.path.dirname(__file__), "..", "web-panel", "dist")
+if os.path.isdir(PANEL_DIST):
+    app.mount("/panel-assets", StaticFiles(directory=PANEL_DIST), name="panel-static")
+
+    @app.get("/candyconnect/{rest_of_path:path}")
+    @app.get("/candyconnect")
+    async def serve_panel(rest_of_path: str = ""):
+        index = os.path.join(PANEL_DIST, "index.html")
+        if os.path.exists(index):
+            return FileResponse(index)
+        return {"error": "Panel not built. Run: cd web-panel && npm run build"}
+
+
+# ── Health Check ──
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "version": "1.4.2", "timestamp": int(time.time())}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=PANEL_PORT,
+        log_level="info",
+        reload=False,
+    )

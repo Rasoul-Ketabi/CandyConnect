@@ -1,0 +1,293 @@
+"""
+CandyConnect - OpenVPN Protocol Manager
+"""
+import asyncio, os, time
+from protocols.base import BaseProtocol
+from database import get_core_config, get_core_status, set_core_status, add_log
+from config import DATA_DIR
+
+
+class OpenVPNProtocol(BaseProtocol):
+    PROTOCOL_ID = "openvpn"
+    PROTOCOL_NAME = "OpenVPN"
+    DEFAULT_PORT = 1194
+
+    OVPN_DIR = "/etc/openvpn/server"
+    EASYRSA_DIR = "/etc/openvpn/easy-rsa"
+    PKI_DIR = "/etc/openvpn/easy-rsa/pki"
+
+    async def install(self) -> bool:
+        try:
+            await add_log("INFO", self.PROTOCOL_NAME, "Installing OpenVPN...")
+
+            rc, _, err = await self._run_cmd(
+                "sudo apt update && sudo apt install openvpn easy-rsa iptables -y",
+                check=False,
+            )
+            if rc != 0:
+                await add_log("ERROR", self.PROTOCOL_NAME, f"Installation failed: {err}")
+                return False
+
+            # Set up Easy-RSA PKI
+            os.makedirs(self.EASYRSA_DIR, exist_ok=True)
+            await self._run_cmd(f"cp -r /usr/share/easy-rsa/* {self.EASYRSA_DIR}/", check=False)
+
+            # Initialize PKI
+            await self._run_cmd(
+                f"cd {self.EASYRSA_DIR} && ./easyrsa --batch init-pki",
+                check=False,
+            )
+            # Build CA
+            await self._run_cmd(
+                f"cd {self.EASYRSA_DIR} && EASYRSA_BATCH=1 ./easyrsa --batch build-ca nopass",
+                check=False,
+            )
+            # Generate server cert
+            await self._run_cmd(
+                f"cd {self.EASYRSA_DIR} && EASYRSA_BATCH=1 ./easyrsa --batch build-server-full server nopass",
+                check=False,
+            )
+            # Generate DH params
+            await self._run_cmd(
+                f"cd {self.EASYRSA_DIR} && ./easyrsa --batch gen-dh",
+                check=False,
+            )
+            # Generate TLS-Crypt key
+            await self._run_cmd(
+                f"sudo openvpn --genkey secret {self.EASYRSA_DIR}/pki/tc.key",
+                check=False,
+            )
+
+            # Enable IP forwarding
+            await self._run_cmd("sudo sysctl -w net.ipv4.ip_forward=1", check=False)
+            await self._run_cmd(
+                "grep -q 'net.ipv4.ip_forward=1' /etc/sysctl.conf || echo 'net.ipv4.ip_forward=1' | sudo tee -a /etc/sysctl.conf",
+                check=False,
+            )
+
+            await add_log("INFO", self.PROTOCOL_NAME, "OpenVPN installed successfully")
+            return True
+        except Exception as e:
+            await add_log("ERROR", self.PROTOCOL_NAME, f"Installation error: {e}")
+            return False
+
+    async def start(self) -> bool:
+        try:
+            config = await get_core_config("openvpn")
+            if not config:
+                await add_log("ERROR", self.PROTOCOL_NAME, "No OpenVPN config found")
+                return False
+
+            await self._write_server_config(config)
+
+            rc, _, err = await self._run_cmd(
+                "sudo systemctl enable openvpn-server@server && sudo systemctl start openvpn-server@server",
+                check=False,
+            )
+            if rc != 0:
+                # Try alternative service name
+                await self._run_cmd(
+                    "sudo systemctl enable openvpn@server && sudo systemctl start openvpn@server",
+                    check=False,
+                )
+
+            running = await self._is_service_active("openvpn-server@server") or \
+                      await self._is_service_active("openvpn@server")
+
+            if running:
+                version = await self.get_version()
+                await set_core_status(self.PROTOCOL_ID, {
+                    "status": "running",
+                    "pid": None,
+                    "started_at": int(time.time()),
+                    "version": version,
+                })
+                await add_log("INFO", self.PROTOCOL_NAME, "OpenVPN started")
+                return True
+            else:
+                await add_log("ERROR", self.PROTOCOL_NAME, f"OpenVPN failed to start: {err}")
+                return False
+        except Exception as e:
+            await add_log("ERROR", self.PROTOCOL_NAME, f"Failed to start: {e}")
+            return False
+
+    async def stop(self) -> bool:
+        try:
+            await self._run_cmd("sudo systemctl stop openvpn-server@server", check=False)
+            await self._run_cmd("sudo systemctl stop openvpn@server", check=False)
+
+            status = await get_core_status(self.PROTOCOL_ID)
+            await set_core_status(self.PROTOCOL_ID, {
+                "status": "stopped",
+                "pid": None,
+                "started_at": None,
+                "version": status.get("version", ""),
+            })
+            await add_log("INFO", self.PROTOCOL_NAME, "OpenVPN stopped")
+            return True
+        except Exception as e:
+            await add_log("ERROR", self.PROTOCOL_NAME, f"Failed to stop: {e}")
+            return False
+
+    async def is_running(self) -> bool:
+        return await self._is_service_active("openvpn-server@server") or \
+               await self._is_service_active("openvpn@server")
+
+    async def get_version(self) -> str:
+        rc, out, _ = await self._run_cmd("openvpn --version", check=False)
+        if rc == 0 or out:
+            # "OpenVPN 2.6.8 x86_64 ..."
+            for line in out.split("\n"):
+                if "OpenVPN" in line:
+                    parts = line.split()
+                    for i, p in enumerate(parts):
+                        if p == "OpenVPN" and i + 1 < len(parts):
+                            return parts[i + 1]
+        return ""
+
+    async def get_active_connections(self) -> int:
+        status_file = "/var/log/openvpn/openvpn-status.log"
+        if not os.path.exists(status_file):
+            status_file = "/etc/openvpn/server/openvpn-status.log"
+        rc, out, _ = await self._run_cmd(
+            f"grep -c 'CLIENT_LIST' {status_file} 2>/dev/null || echo 0",
+            check=False,
+        )
+        try:
+            count = int(out.strip())
+            return max(0, count - 1)  # Subtract header
+        except ValueError:
+            return 0
+
+    async def add_client(self, username: str, client_data: dict) -> dict:
+        """Generate client certificate and return .ovpn config data."""
+        # Generate client cert
+        await self._run_cmd(
+            f"cd {self.EASYRSA_DIR} && EASYRSA_BATCH=1 ./easyrsa --batch build-client-full {username} nopass",
+            check=False,
+        )
+        return {"cert_generated": True, "username": username}
+
+    async def remove_client(self, username: str):
+        await self._run_cmd(
+            f"cd {self.EASYRSA_DIR} && EASYRSA_BATCH=1 ./easyrsa --batch revoke {username}",
+            check=False,
+        )
+        await self._run_cmd(
+            f"cd {self.EASYRSA_DIR} && EASYRSA_BATCH=1 ./easyrsa gen-crl",
+            check=False,
+        )
+
+    async def get_client_config(self, username: str, server_ip: str) -> dict:
+        config = await get_core_config("openvpn")
+        if not config:
+            return {}
+
+        port = config.get("port", 1194)
+        protocol = config.get("protocol", "udp")
+
+        # Read cert files
+        ca = await self._read_file(f"{self.PKI_DIR}/ca.crt")
+        cert = await self._read_file(f"{self.PKI_DIR}/issued/{username}.crt")
+        key = await self._read_file(f"{self.PKI_DIR}/private/{username}.key")
+        tc = await self._read_file(f"{self.PKI_DIR}/tc.key")
+
+        ovpn_config = f"""client
+dev tun
+proto {protocol}
+remote {server_ip} {port}
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+remote-cert-tls server
+cipher {config.get('cipher', 'AES-256-GCM')}
+auth {config.get('auth', 'SHA512')}
+verb 3
+<ca>
+{ca}
+</ca>
+<cert>
+{cert}
+</cert>
+<key>
+{key}
+</key>
+<tls-crypt>
+{tc}
+</tls-crypt>
+"""
+        return {
+            "type": "openvpn",
+            "server": server_ip,
+            "port": port,
+            "protocol": protocol,
+            "ovpn_config": ovpn_config,
+        }
+
+    async def _read_file(self, path: str) -> str:
+        try:
+            rc, out, _ = await self._run_cmd(f"sudo cat {path}", check=False)
+            return out if rc == 0 else ""
+        except Exception:
+            return ""
+
+    async def _write_server_config(self, config: dict):
+        """Write OpenVPN server configuration."""
+        os.makedirs(self.OVPN_DIR, exist_ok=True)
+
+        # Detect default network interface
+        _, default_iface, _ = await self._run_cmd(
+            "ip route show default | awk '{print $5}' | head -1",
+            check=False,
+        )
+        default_iface = default_iface.strip() or "eth0"
+
+        subnet = config.get("subnet", "10.8.0.0/24")
+        subnet_ip = subnet.split("/")[0]
+        subnet_mask = "255.255.255.0"
+
+        server_conf = f"""port {config.get('port', 1194)}
+proto {config.get('protocol', 'udp')}
+dev {config.get('device', 'tun')}
+ca {self.PKI_DIR}/ca.crt
+cert {self.PKI_DIR}/issued/server.crt
+key {self.PKI_DIR}/private/server.key
+dh none
+topology subnet
+server {subnet_ip} {subnet_mask}
+ifconfig-pool-persist /var/log/openvpn/ipp.txt
+push "dhcp-option DNS {config.get('dns1', '1.1.1.1')}"
+push "dhcp-option DNS {config.get('dns2', '8.8.8.8')}"
+push "redirect-gateway def1 bypass-dhcp"
+keepalive {config.get('keepalive', '10 120')}
+cipher {config.get('cipher', 'AES-256-GCM')}
+auth {config.get('auth', 'SHA512')}
+max-clients {config.get('max_clients', 100)}
+user nobody
+group nogroup
+persist-key
+persist-tun
+status /var/log/openvpn/openvpn-status.log
+log /var/log/openvpn/openvpn.log
+verb 3
+crl-verify {self.PKI_DIR}/crl.pem
+"""
+        if config.get("tls_crypt"):
+            server_conf += f"tls-crypt {self.PKI_DIR}/tc.key\n"
+        if config.get("comp_lzo"):
+            server_conf += "compress lzo\n"
+
+        conf_path = os.path.join(self.OVPN_DIR, "server.conf")
+        await self._run_cmd(f"sudo mkdir -p /var/log/openvpn", check=False)
+
+        with open("/tmp/cc_ovpn_server.conf", "w") as f:
+            f.write(server_conf)
+        await self._run_cmd(f"sudo mv /tmp/cc_ovpn_server.conf {conf_path}", check=False)
+
+        # Setup NAT
+        await self._run_cmd(
+            f"sudo iptables -t nat -C POSTROUTING -s {subnet} -o {default_iface} -j MASQUERADE 2>/dev/null || "
+            f"sudo iptables -t nat -A POSTROUTING -s {subnet} -o {default_iface} -j MASQUERADE",
+            check=False,
+        )

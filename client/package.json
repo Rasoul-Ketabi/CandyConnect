@@ -1,0 +1,29 @@
+{
+  "name": "candyconnect-vpn",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "index.tsx",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tauri-apps/plugin-fs": "^2.4.5",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/api": "^2.0.1",
+    "@tauri-apps/cli": "^2.0.0-rc.18",
+    "@types/node": "^22.14.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "concurrently": "^8.2.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0",
+    "wait-on": "^7.0.1"
+  }
+}

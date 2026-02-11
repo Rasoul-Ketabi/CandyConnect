@@ -1,0 +1,86 @@
+use std::fs;
+use tauri::Manager;
+
+fn init_app_files(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .expect("Failed to get app data directory");
+
+    // Create the app data directory if it doesn't exist
+    if !app_data_dir.exists() {
+        fs::create_dir_all(&app_data_dir)?;
+    }
+
+    // Initialize settings.json with default values if it doesn't exist
+    let settings_path = app_data_dir.join("settings.json");
+    if !settings_path.exists() {
+        let default_settings = serde_json::json!({
+            "autoConnect": false,
+            "launchAtStartup": false,
+            "selectedProfile": "",
+            "selectedProtocol": "v2ray",
+            "theme": "light",
+            "language": "en",
+            "proxyHost": "127.0.0.1",
+            "proxyPort": 1080,
+            "adBlocking": true,
+            "malwareProtection": true,
+            "phishingPrevention": false,
+            "cryptominerBlocking": false,
+            "directCountryAccess": true,
+            "v2rayCore": "sing-box",
+            "wireguardCore": "amnezia",
+            "proxyMode": "proxy",
+            "proxyType": "socks",
+            "autoReconnect": true,
+            "killSwitch": false,
+            "dnsLeakProtection": true,
+            "splitTunneling": false
+        });
+        fs::write(&settings_path, serde_json::to_string_pretty(&default_settings)?)?;
+        log::info!("Created default settings.json");
+    }
+
+    // Initialize account.json with empty object if it doesn't exist
+    let account_path = app_data_dir.join("account.json");
+    if !account_path.exists() {
+        let default_account = serde_json::json!({});
+        fs::write(&account_path, serde_json::to_string_pretty(&default_account)?)?;
+        log::info!("Created default account.json");
+    }
+
+    // Initialize candy.logs with empty array if it doesn't exist
+    let logs_path = app_data_dir.join("candy.logs");
+    if !logs_path.exists() {
+        fs::write(&logs_path, "[]")?;
+        log::info!("Created default candy.logs");
+    }
+
+    log::info!("App data directory: {:?}", app_data_dir);
+    Ok(())
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+  tauri::Builder::default()
+    .plugin(tauri_plugin_fs::init())
+    .setup(|app| {
+      if cfg!(debug_assertions) {
+        app.handle().plugin(
+          tauri_plugin_log::Builder::default()
+            .level(log::LevelFilter::Info)
+            .build(),
+        )?;
+      }
+
+      // Initialize app data files
+      if let Err(e) = init_app_files(app) {
+        log::error!("Failed to initialize app files: {}", e);
+      }
+
+      Ok(())
+    })
+    .run(tauri::generate_context!())
+    .expect("error while running tauri application");
+}

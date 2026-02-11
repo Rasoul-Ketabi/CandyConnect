@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Nunito', sans-serif;
+  background: #FBEFE0;
+  overflow-x: hidden;
+}
+
+html.dark body { background: #0f172a; }
+
+@supports (padding: env(safe-area-inset-top)) {
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: rgba(148,163,184,0.1); border-radius: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(251,146,60,0.5); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(251,146,60,0.7); }
+.dark ::-webkit-scrollbar-thumb { background: rgba(251,146,60,0.6); }
+
+* { scrollbar-width: thin; scrollbar-color: rgba(251,146,60,0.5) transparent; }
+
+input, select, textarea { font-size: 16px !important; }
+
+@keyframes fade-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.animate-fade-in { animation: fade-in 0.3s ease both; }
