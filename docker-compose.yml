@@ -1,0 +1,78 @@
+# ═══════════════════════════════════════════════════════════
+#  CandyConnect - Docker Compose
+#  Works on Linux, macOS, and Windows (Docker Desktop)
+# ═══════════════════════════════════════════════════════════
+
+services:
+  # ── Redis Database ──
+  redis:
+    image: redis:7-alpine
+    container_name: candyconnect-redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - candyconnect-net
+
+  # ── CandyConnect Server ──
+  candyconnect:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: candyconnect-server
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "${CC_PANEL_PORT:-8443}:${CC_PANEL_PORT:-8443}"
+      # VPN protocol ports (uncomment the ones you need)
+      # - "443:443"       # V2Ray / Xray
+      # - "51820:51820/udp"  # WireGuard
+      # - "1194:1194/udp"    # OpenVPN
+      # - "500:500/udp"      # IKEv2
+      # - "4500:4500/udp"    # IKEv2 NAT-T
+      # - "1701:1701/udp"    # L2TP
+      # - "53:53/udp"        # DNSTT
+      # - "8388:8388"        # SlipStream
+      # - "9443:9443"        # TrustTunnel
+    environment:
+      - CC_DATA_DIR=/opt/candyconnect
+      - CC_REDIS_URL=redis://redis:6379/0
+      - CC_JWT_SECRET=${CC_JWT_SECRET:-}
+      - CC_PANEL_PORT=${CC_PANEL_PORT:-8443}
+      - CC_PANEL_PATH=${CC_PANEL_PATH:-/candyconnect}
+      - CC_ADMIN_USER=${CC_ADMIN_USER:-admin}
+      - CC_ADMIN_PASS=${CC_ADMIN_PASS:-admin123}
+    volumes:
+      - candyconnect_data:/opt/candyconnect/cores
+      - candyconnect_backups:/opt/candyconnect/backups
+      - candyconnect_logs:/opt/candyconnect/logs
+    # Required for VPN protocol management (iptables, network config)
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+    networks:
+      - candyconnect-net
+
+volumes:
+  redis_data:
+    driver: local
+  candyconnect_data:
+    driver: local
+  candyconnect_backups:
+    driver: local
+  candyconnect_logs:
+    driver: local
+
+networks:
+  candyconnect-net:
+    driver: bridge

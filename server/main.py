@@ -14,6 +14,9 @@ from config import PANEL_PORT, DATA_DIR, CORE_DIR, BACKUP_DIR, LOG_DIR
 from database import init_db, close_redis, add_log
 from protocols.manager import protocol_manager
 
+# Global flag for database availability
+_db_ready = False
+
 # ── Logging ──
 logging.basicConfig(
     level=logging.INFO,
@@ -29,7 +32,8 @@ async def traffic_updater():
     """Periodically update traffic cache."""
     while True:
         try:
-            await protocol_manager.update_traffic_cache()
+            if _db_ready:
+                await protocol_manager.update_traffic_cache()
         except Exception as e:
             logger.warning(f"Traffic updater error: {e}")
         await asyncio.sleep(30)
@@ -39,8 +43,9 @@ async def status_checker():
     """Periodically verify core statuses match reality."""
     while True:
         try:
-            cores = await protocol_manager.get_all_cores_info()
-            # Status verification happens inside get_all_cores_info
+            if _db_ready:
+                cores = await protocol_manager.get_all_cores_info()
+                # Status verification happens inside get_all_cores_info
         except Exception as e:
             logger.warning(f"Status checker error: {e}")
         await asyncio.sleep(60)
@@ -50,26 +55,28 @@ async def status_checker():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _db_ready
+
     # Startup
     for d in [DATA_DIR, CORE_DIR, BACKUP_DIR, LOG_DIR]:
         os.makedirs(d, exist_ok=True)
 
     # Initialize database (graceful if Redis is unavailable)
-    db_ready = False
     try:
         await init_db()
-        db_ready = True
+        _db_ready = True
     except Exception as e:
         logger.warning(f"init_db failed: {e}. Starting without Redis (degraded mode).")
+        _db_ready = False
 
-    if db_ready:
+    if _db_ready:
         try:
             await add_log("INFO", "System", "CandyConnect server started")
         except Exception:
             pass
     logger.info("CandyConnect server started")
 
-    # Start background tasks (they are resilient to failures)
+    # Start background tasks (they check _db_ready before doing work)
     tasks = [
         asyncio.create_task(traffic_updater()),
         asyncio.create_task(status_checker()),
@@ -80,11 +87,12 @@ async def lifespan(app: FastAPI):
     # Shutdown
     for t in tasks:
         t.cancel()
-    try:
-        await add_log("INFO", "System", "CandyConnect server shutting down")
-    except Exception:
-        pass
-    await close_redis()
+    if _db_ready:
+        try:
+            await add_log("INFO", "System", "CandyConnect server shutting down")
+        except Exception:
+            pass
+        await close_redis()
 
 
 # ── FastAPI App ──
@@ -131,24 +139,34 @@ app.include_router(client_router, prefix="/client-api")
 
 # ── Serve Web Panel Static Files ──
 
-PANEL_DIST = os.path.join(os.path.dirname(__file__), "..", "web-panel", "dist")
+PANEL_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "web-panel", "dist")
+PANEL_DIST = os.path.normpath(PANEL_DIST)
+
 if os.path.isdir(PANEL_DIST):
-    # Mount assets at the same path Vite expects them
-    app.mount("/candyconnect/assets", StaticFiles(directory=os.path.join(PANEL_DIST, "assets")), name="panel-assets")
+    # Mount assets ONLY if the assets directory actually exists
+    _assets_dir = os.path.join(PANEL_DIST, "assets")
+    if os.path.isdir(_assets_dir):
+        app.mount("/candyconnect/assets", StaticFiles(directory=_assets_dir), name="panel-assets")
 
     @app.get("/candyconnect/{rest_of_path:path}")
     @app.get("/candyconnect")
     async def serve_panel(rest_of_path: str = ""):
         # Check if the requested path is actually a file (like favicon or manifest)
-        file_path = os.path.join(PANEL_DIST, rest_of_path)
-        if rest_of_path and os.path.isfile(file_path):
-            return FileResponse(file_path)
+        if rest_of_path:
+            file_path = os.path.join(PANEL_DIST, rest_of_path)
+            # Prevent path traversal
+            file_path = os.path.normpath(file_path)
+            if file_path.startswith(PANEL_DIST) and os.path.isfile(file_path):
+                return FileResponse(file_path)
 
         # Otherwise return index.html for SPA routing
         index = os.path.join(PANEL_DIST, "index.html")
         if os.path.exists(index):
             return FileResponse(index)
-        return {"error": "Panel not built. Run: cd web-panel && npm run build"}
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Panel not built. Run: cd web-panel && npm run build"},
+        )
 
 
 # ── Health Check ──

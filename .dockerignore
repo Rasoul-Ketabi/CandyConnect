@@ -1,0 +1,62 @@
+# ═══════════════════════════════════
+#  CandyConnect - .dockerignore
+# ═══════════════════════════════════
+
+# Git
+.git
+.github
+.gitignore
+
+# Dependencies (will be installed inside container)
+node_modules/
+web-panel/node_modules/
+client/node_modules/
+server/venv/
+server/.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Build artifacts (will be built inside container)
+web-panel/dist/
+web-panel/src-tauri/
+dist/
+build/
+
+# Client app (not needed in server container)
+client/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.suo
+*.sw?
+*.swp
+
+# Environment files (passed via docker-compose)
+.env
+.env.*
+
+# Logs
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker files themselves
+Dockerfile
+docker-compose.yml
+docker-run.sh
+docker-run.bat
+docker-run.ps1
+
+# Misc
+*.bak
+*.tmp
+*.orig
+coverage/
+.cache/
+prompt.txt
+README.md

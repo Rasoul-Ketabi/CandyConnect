@@ -19,13 +19,27 @@ async def get_redis() -> redis.Redis:
     global _pool
     if _pool is None:
         _pool = redis.from_url(REDIS_URL, decode_responses=True)
+    # Verify connection is alive
+    try:
+        await _pool.ping()
+    except Exception:
+        # Connection is broken, reset and retry once
+        try:
+            await _pool.aclose()
+        except Exception:
+            pass
+        _pool = redis.from_url(REDIS_URL, decode_responses=True)
+        await _pool.ping()  # Let this raise if still failing
     return _pool
 
 
 async def close_redis():
     global _pool
     if _pool:
-        await _pool.aclose()
+        try:
+            await _pool.aclose()
+        except Exception:
+            pass
         _pool = None
 
 
@@ -49,8 +63,10 @@ def _gen_id() -> str:
 # ── Initialization ──
 
 async def init_db():
-    """Seed default data if DB is empty."""
+    """Seed default data if DB is empty. Raises on connection failure."""
+    # Test Redis connectivity first
     r = await get_redis()
+    await r.ping()  # Will raise if Redis is unreachable
 
     # Admin
     if not await r.exists(K_ADMIN):

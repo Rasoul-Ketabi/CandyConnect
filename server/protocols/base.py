@@ -116,19 +116,28 @@ class BaseProtocol:
 
     # ── Helpers ──
 
-    async def _run_cmd(self, cmd: str, check: bool = True) -> tuple[int, str, str]:
+    async def _run_cmd(self, cmd: str, check: bool = True, timeout: int = 30) -> tuple[int, str, str]:
         """Run a shell command and return (returncode, stdout, stderr)."""
-        proc = await asyncio.create_subprocess_shell(
-            cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        out = stdout.decode("utf-8", errors="replace").strip()
-        err = stderr.decode("utf-8", errors="replace").strip()
-        if check and proc.returncode != 0:
-            logger.error(f"Command failed: {cmd}\nstderr: {err}")
-        return proc.returncode, out, err
+        try:
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            out = stdout.decode("utf-8", errors="replace").strip()
+            err = stderr.decode("utf-8", errors="replace").strip()
+            if check and proc.returncode != 0:
+                logger.error(f"Command failed: {cmd}\nstderr: {err}")
+            return proc.returncode, out, err
+        except asyncio.TimeoutError:
+            logger.error(f"Command timed out after {timeout}s: {cmd}")
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
+            return -1, "", f"Command timed out after {timeout}s"
 
     async def _start_process(self, cmd: str, cwd: str = None) -> Optional[int]:
         """Start a background process and return its PID."""

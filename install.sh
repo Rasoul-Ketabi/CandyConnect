@@ -125,23 +125,26 @@ EOF
 create_systemd_service() {
     info "Creating systemd service..."
 
-    cat > /etc/systemd/system/${CC_SERVICE}.service << EOF
+    cat > /etc/systemd/system/${CC_SERVICE}.service << 'SERVICEEOF'
 [Unit]
 Description=CandyConnect VPN Server
 After=network.target redis-server.service
 Wants=redis-server.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
 User=root
 Group=root
-WorkingDirectory=$CC_SERVER_DIR
-EnvironmentFile=$CC_DIR/.env
-ExecStart=$CC_SERVER_DIR/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port $CC_PORT --log-level info
-Restart=always
-RestartSec=5
-StandardOutput=append:$CC_DIR/logs/server.log
-StandardError=append:$CC_DIR/logs/server.log
+WorkingDirectory=CC_SERVER_DIR_PLACEHOLDER
+EnvironmentFile=CC_DIR_PLACEHOLDER/.env
+ExecStartPre=/bin/bash -c 'redis-cli ping > /dev/null 2>&1 || sleep 5'
+ExecStart=CC_SERVER_DIR_PLACEHOLDER/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port ${CC_PANEL_PORT} --log-level info
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:CC_DIR_PLACEHOLDER/logs/server.log
+StandardError=append:CC_DIR_PLACEHOLDER/logs/server.log
 
 # Security
 NoNewPrivileges=false
@@ -149,7 +152,11 @@ ProtectSystem=false
 
 [Install]
 WantedBy=multi-user.target
-EOF
+SERVICEEOF
+
+    # Replace placeholders with actual paths
+    sed -i "s|CC_SERVER_DIR_PLACEHOLDER|$CC_SERVER_DIR|g" /etc/systemd/system/${CC_SERVICE}.service
+    sed -i "s|CC_DIR_PLACEHOLDER|$CC_DIR|g" /etc/systemd/system/${CC_SERVICE}.service
 
     systemctl daemon-reload
     systemctl enable "$CC_SERVICE"
