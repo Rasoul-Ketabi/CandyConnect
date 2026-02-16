@@ -18,15 +18,12 @@ class OpenVPNProtocol(BaseProtocol):
 
     async def install(self) -> bool:
         try:
-            await add_log("INFO", self.PROTOCOL_NAME, "Installing OpenVPN...")
+            await add_log("INFO", self.PROTOCOL_NAME, "Configuring OpenVPN...")
 
-            rc, _, err = await self._run_cmd(
-                "sudo apt update && sudo apt install openvpn easy-rsa iptables -y",
-                check=False,
-            )
-            if rc != 0:
-                await add_log("ERROR", self.PROTOCOL_NAME, f"Installation failed: {err}")
-                return False
+            # Check if installed
+            if not await self._is_installed("openvpn"):
+                if not await self._apt_install("openvpn easy-rsa"):
+                    return False
 
             # Set up Easy-RSA PKI
             os.makedirs(self.EASYRSA_DIR, exist_ok=True)
@@ -54,9 +51,19 @@ class OpenVPNProtocol(BaseProtocol):
             )
             # Generate TLS-Crypt key
             await self._run_cmd(
-                f"sudo openvpn --genkey secret {self.EASYRSA_DIR}/pki/tc.key",
+                f"sudo openvpn --genkey secret {self.PKI_DIR}/tc.key",
                 check=False,
             )
+            
+            # Generate initial CRL (needed for crl-verify to work)
+            await self._run_cmd(
+                f"cd {self.EASYRSA_DIR} && EASYRSA_BATCH=1 ./easyrsa gen-crl",
+                check=False,
+            )
+            
+            # Ensure proper permissions and links
+            await self._run_cmd(f"sudo chown -R root:root {self.OVPN_DIR} {self.EASYRSA_DIR}", check=False)
+            await self._run_cmd(f"sudo chmod -R 700 {self.EASYRSA_DIR}", check=False)
 
             # Enable IP forwarding
             await self._run_cmd("sudo sysctl -w net.ipv4.ip_forward=1", check=False)
@@ -80,21 +87,22 @@ class OpenVPNProtocol(BaseProtocol):
 
             await self._write_server_config(config)
 
+            # Try systemctl first
             rc, _, err = await self._run_cmd(
                 "sudo systemctl enable openvpn-server@server && sudo systemctl start openvpn-server@server",
                 check=False,
             )
+            
             if rc != 0:
-                # Try direct call (docker-friendly)
-                await self._start_process(
+                # Fallback: direct process start (Docker typical)
+                pid = await self._start_process(
                     f"openvpn --config {os.path.join(self.OVPN_DIR, 'server.conf')}"
                 )
-
-            running = await self._is_service_active("openvpn-server@server") or \
-                      await self._is_service_active("openvpn@server") or \
-                      await self.is_running()
-
-            if running:
+                if not pid:
+                     await add_log("ERROR", self.PROTOCOL_NAME, f"OpenVPN failed to start: {err}")
+                     return False
+            else:
+                # Update status for systemctl start
                 version = await self.get_version()
                 await set_core_status(self.PROTOCOL_ID, {
                     "status": "running",
@@ -102,19 +110,19 @@ class OpenVPNProtocol(BaseProtocol):
                     "started_at": int(time.time()),
                     "version": version,
                 })
-                await add_log("INFO", self.PROTOCOL_NAME, "OpenVPN started")
-                return True
-            else:
-                await add_log("ERROR", self.PROTOCOL_NAME, f"OpenVPN failed to start: {err}")
-                return False
+
+            await add_log("INFO", self.PROTOCOL_NAME, "OpenVPN started")
+            return True
         except Exception as e:
             await add_log("ERROR", self.PROTOCOL_NAME, f"Failed to start: {e}")
             return False
 
     async def stop(self) -> bool:
         try:
+            # Stop both systemctl and direct processes
             await self._run_cmd("sudo systemctl stop openvpn-server@server", check=False)
             await self._run_cmd("sudo systemctl stop openvpn@server", check=False)
+            await self._run_cmd("sudo pkill openvpn", check=False)
 
             status = await get_core_status(self.PROTOCOL_ID)
             await set_core_status(self.PROTOCOL_ID, {
@@ -130,8 +138,12 @@ class OpenVPNProtocol(BaseProtocol):
             return False
 
     async def is_running(self) -> bool:
-        return await self._is_service_active("openvpn-server@server") or \
-               await self._is_service_active("openvpn@server")
+        # Check systemctl OR base process check
+        if await self._is_service_active("openvpn-server@server") or await self._is_service_active("openvpn@server"):
+            return True
+        # Check if process exists in table
+        rc, out, _ = await self._run_cmd("pgrep openvpn", check=False)
+        return rc == 0
 
     async def get_version(self) -> str:
         rc, out, _ = await self._run_cmd("openvpn --version", check=False)

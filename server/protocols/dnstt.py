@@ -21,34 +21,48 @@ class DNSTTProtocol(BaseProtocol):
             await add_log("INFO", self.PROTOCOL_NAME, "Configuring DNSTT...")
             os.makedirs(self.DNSTT_DIR, exist_ok=True)
 
-            # Check if binary exists (should be in /usr/local/bin from Docker)
+            # Check if binary exists (should be in /usr/local/bin from Docker or installer)
             dnstt_bin = "/usr/local/bin/dnstt-server"
             if not os.path.exists(dnstt_bin):
-                await add_log("ERROR", self.PROTOCOL_NAME, "dnstt-server binary not found in /usr/local/bin")
-                return False
+                # Try simple path search
+                rc, path, _ = await self._run_cmd("which dnstt-server", check=False)
+                if rc == 0:
+                    dnstt_bin = path.strip()
+                else:
+                    await add_log("ERROR", self.PROTOCOL_NAME, "dnstt-server binary not found")
+                    return False
 
-            # Create dnstt user if not exists
-            await self._run_cmd("id dnstt &>/dev/null || useradd -r -s /bin/false -d /nonexistent dnstt", check=False)
+            # Create dnstt user if not exists (as in dnstt-deploy.sh)
+            await self._run_cmd(
+                "id dnstt &>/dev/null || sudo useradd -r -s /bin/false -d /nonexistent -c 'dnstt service user' dnstt",
+                check=False
+            )
+            await self._run_cmd(f"sudo chown dnstt:dnstt {self.DNSTT_DIR}", check=False)
+            await self._run_cmd(f"sudo chmod 750 {self.DNSTT_DIR}", check=False)
 
-            # Generate keypair if missing
-            priv_key = os.path.join(self.DNSTT_DIR, "server.key")
-            pub_key = os.path.join(self.DNSTT_DIR, "server.pub")
+            # Generate keypair if missing (prefixed with domain name)
+            config = await get_core_config("dnstt") or {}
+            domain = config.get("domain", "dns.candyconnect.io")
+            key_prefix = domain.replace(".", "_")
+            
+            priv_key = os.path.join(self.DNSTT_DIR, f"{key_prefix}_server.key")
+            pub_key = os.path.join(self.DNSTT_DIR, f"{key_prefix}_server.pub")
             
             if not os.path.exists(priv_key):
                 await self._run_cmd(
-                    f"{dnstt_bin} -gen-key -privkey-file {priv_key} -pubkey-file {pub_key}",
+                    f"sudo {dnstt_bin} -gen-key -privkey-file {priv_key} -pubkey-file {pub_key}",
                     check=False,
                 )
-                await self._run_cmd(f"chown dnstt:dnstt {priv_key} {pub_key}", check=False)
-                await self._run_cmd(f"chmod 600 {priv_key}", check=False)
+                await self._run_cmd(f"sudo chown dnstt:dnstt {priv_key} {pub_key}", check=False)
+                await self._run_cmd(f"sudo chmod 600 {priv_key}", check=False)
+                await self._run_cmd(f"sudo chmod 644 {pub_key}", check=False)
 
             # Update public key in DB
             if os.path.exists(pub_key):
-                with open(pub_key, "r") as f:
-                    key_content = f.read().strip()
+                rc, key_content, _ = await self._run_cmd(f"cat {pub_key}", check=False)
+                if rc == 0:
+                    config["public_key"] = key_content.strip()
                     from database import update_core_config
-                    config = await get_core_config("dnstt") or {}
-                    config["public_key"] = key_content
                     await update_core_config("dnstt", config)
 
             await add_log("INFO", self.PROTOCOL_NAME, "DNSTT configured successfully")
@@ -66,24 +80,38 @@ class DNSTTProtocol(BaseProtocol):
 
             dnstt_bin = "/usr/local/bin/dnstt-server"
             if not os.path.exists(dnstt_bin):
-                await add_log("ERROR", self.PROTOCOL_NAME, "dnstt-server binary missing")
-                return False
+                rc, path, _ = await self._run_cmd("which dnstt-server", check=False)
+                if rc == 0:
+                    dnstt_bin = path.strip()
+                else:
+                    await add_log("ERROR", self.PROTOCOL_NAME, "dnstt-server binary missing")
+                    return False
 
             domain = config.get("domain", "dns.candyconnect.io")
             listen_port = config.get("listen_port", 5300)
             mtu = config.get("mtu", 1232)
             tunnel_mode = config.get("tunnel_mode", "ssh")
-            priv_key = os.path.join(self.DNSTT_DIR, "server.key")
+            key_prefix = domain.replace(".", "_")
+            priv_key = os.path.join(self.DNSTT_DIR, f"{key_prefix}_server.key")
 
-            # Determine target port (SSH=22, SOCKS=1080)
+            # Determine target port (SSH=auto, SOCKS=1080)
             target_port = 22
             if tunnel_mode == "socks":
                 target_port = 1080
-                # Ensure danted is running
+                # Ensure danted is installed and configured
+                await self._setup_dante()
                 await self._run_cmd("sudo systemctl start danted", check=False)
             else:
+                # Detect SSH port (as in dnstt-deploy.sh)
+                rc, ssh_p, _ = await self._run_cmd("ss -tlnp | grep sshd | awk '{print $4}' | cut -d':' -f2 | head -1", check=False)
+                if rc == 0 and ssh_p.strip():
+                    target_port = int(ssh_p.strip())
+                
                 # Ensure ssh is running
-                await self._run_cmd("sudo systemctl start ssh", check=False)
+                rc, _, _ = await self._run_cmd("sudo systemctl start ssh", check=False)
+                if rc != 0:
+                    # Docker fallback
+                    await self._run_cmd("sudo /usr/sbin/sshd", check=False)
 
             # Redirect port 53 to listen_port
             await self._setup_redirection(listen_port)
@@ -121,8 +149,61 @@ class DNSTTProtocol(BaseProtocol):
             check=False,
         )
 
+    async def _setup_redirection(self, port: int):
+        """Redirect port 53/udp to the custom listen port using iptables."""
+        # Get default interface (as in dnstt-deploy.sh)
+        _, iface, _ = await self._run_cmd("ip route | grep default | awk '{print $5}' | head -1", check=False)
+        iface = iface.strip() or "eth0"
+        
+        # Add rules
+        await self._run_cmd(f"sudo iptables -I INPUT -p udp --dport {port} -j ACCEPT", check=False)
+        await self._run_cmd(
+            f"sudo iptables -t nat -I PREROUTING -i {iface} -p udp --dport 53 -j REDIRECT --to-ports {port}",
+            check=False,
+        )
+        # IPv6 support if available
+        if os.path.exists("/proc/net/if_inet6"):
+            await self._run_cmd(f"sudo ip6tables -I INPUT -p udp --dport {port} -j ACCEPT", check=False)
+            await self._run_cmd(
+                f"sudo ip6tables -t nat -I PREROUTING -i {iface} -p udp --dport 53 -j REDIRECT --to-ports {port}",
+                check=False,
+            )
+
+    async def _setup_dante(self):
+        """Configure dante-server for DNSTT SOCKS mode."""
+        _, iface, _ = await self._run_cmd("ip route | grep default | awk '{print $5}' | head -1", check=False)
+        iface = iface.strip() or "eth0"
+        
+        config_path = "/etc/danted.conf"
+        content = f"""
+logoutput: syslog
+user.privileged: root
+user.unprivileged: nobody
+
+internal: 127.0.0.1 port = 1080
+external: {iface}
+socksmethod: none
+compatibility: sameport
+extension: bind
+
+client pass {{
+    from: 127.0.0.1/8 to: 0.0.0.0/0
+    log: error
+}}
+
+socks pass {{
+    from: 127.0.0.1/8 to: 0.0.0.0/0
+    command: bind connect udpassociate
+    log: error
+}}
+"""
+        # Backup and write
+        await self._run_cmd(f"echo '{content}' | sudo tee {config_path}", check=False)
+        await self._run_cmd("sudo systemctl enable danted", check=False)
+        await self._run_cmd("sudo systemctl restart danted", check=False)
+
     async def get_version(self) -> str:
-        dnstt_bin = os.path.join(self.DNSTT_DIR, "dnstt-server")
+        dnstt_bin = "/usr/local/bin/dnstt-server"
         if os.path.exists(dnstt_bin):
             rc, out, _ = await self._run_cmd(f"stat -c '%Y' {dnstt_bin}", check=False)
             if rc == 0 and out:

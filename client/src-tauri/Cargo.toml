@@ -1,10 +1,10 @@
 [package]
-name = "app"
+name = "CandyConnect"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "CandyConnect VPN Client"
+authors = ["AmiRCandy"]
 license = ""
-repository = ""
+repository = "https://github.com/AmiRCandy/CandyConnect"
 edition = "2021"
 rust-version = "1.71"
 

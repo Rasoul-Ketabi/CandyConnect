@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getClients, createClient, updateClient, deleteClient as apiDeleteClient, type Client, type ClientProtocols } from '../services/api';
-import { formatClientTraffic, getTrafficPercent, protocolName, protocolIcon, generateUUID } from '../utils/format';
+import { formatClientTraffic, getTrafficPercent, protocolName, protocolIcon } from '../utils/format';
 import ProgressBar from '../components/ProgressBar';
 import Modal from '../components/Modal';
 import { useNotify } from '../components/Notification';
@@ -239,11 +239,28 @@ const ClientsPage: React.FC = () => {
                 </div>
               ))}
             </div>
-            <h4 className="text-xs font-bold text-orange-500 uppercase tracking-wider pt-2">Auth Details</h4>
-            <div className="bg-slate-50 dark:bg-slate-700/30 rounded-lg p-3 text-xs space-y-1.5 break-all">
-              <p><span className="text-slate-400">V2Ray UUID:</span> <span className="text-orange-500 font-mono">{generateUUID(detailClient.username)}</span></p>
-              <p><span className="text-slate-400">WG Public Key:</span> <span className="text-orange-500 font-mono">{btoa(detailClient.username + '_wg_pub').substring(0, 44)}</span></p>
-              <p><span className="text-slate-400">OpenVPN Config:</span> <span className="text-orange-500">{detailClient.username}.ovpn</span></p>
+            <h4 className="text-xs font-bold text-orange-500 uppercase tracking-wider pt-2">Protocol Details</h4>
+            <div className="bg-slate-50 dark:bg-slate-700/30 rounded-lg p-3 text-xs space-y-2 break-all">
+              {Object.entries(detailClient.protocol_data).map(([pid, data]: [string, any]) => (
+                <div key={pid} className="space-y-1">
+                  <p className="font-bold text-slate-400 border-b border-slate-200 dark:border-slate-700/50 pb-0.5 mb-1 flex items-center gap-1.5">
+                    {protocolIcon(pid)} {protocolName(pid)}
+                  </p>
+                  {pid === 'v2ray' && <p><span className="text-slate-400">UUID:</span> <span className="text-orange-500 font-mono">{data.uuid}</span></p>}
+                  {pid === 'wireguard' && <p><span className="text-slate-400">Public Key:</span> <span className="text-orange-500 font-mono">{data.public_key}</span></p>}
+                  {pid === 'dnstt' && (
+                    <>
+                      <p><span className="text-slate-400">SSH User:</span> <span className="text-orange-500 font-mono">{data.ssh_username}</span></p>
+                      <p><span className="text-slate-400">SSH Pass:</span> <span className="text-orange-500 font-mono">{data.ssh_password}</span></p>
+                    </>
+                  )}
+                  {pid === 'openvpn' && <p><span className="text-slate-400">Config:</span> <span className="text-orange-500 font-mono">{detailClient.username}.ovpn available</span></p>}
+                  {pid === 'ikev2' && <p><span className="text-slate-400">Auth:</span> <span className="text-green-500 font-bold">EAP-MSCHAPv2 Active</span></p>}
+                  {pid === 'l2tp' && data.psk && <p><span className="text-slate-400">IPSec PSK:</span> <span className="text-orange-500 font-mono">{data.psk}</span></p>}
+                  {['slipstream', 'trusttunnel'].includes(pid) && <p className="text-slate-400 italic">Experimental protocol</p>}
+                </div>
+              ))}
+              {Object.keys(detailClient.protocol_data).length === 0 && <p className="text-slate-400 italic">No protocol data generated yet.</p>}
             </div>
           </div>
         )}

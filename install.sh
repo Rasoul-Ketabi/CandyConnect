@@ -4,7 +4,6 @@
 # Deploys server core + web panel on Ubuntu/Debian
 # ═══════════════════════════════════════════════════════════
 
-set -euo pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -80,24 +79,52 @@ install_dependencies() {
     apt install -y \
         python3 python3-pip python3-venv \
         redis-server \
-        curl wget unzip git \
-        iptables \
+        curl wget unzip git rsync \
+        iptables iproute2 procps \
         sudo \
-        ca-certificates gnupg
+        ca-certificates gnupg \
+        openvpn easy-rsa \
+        strongswan strongswan-pki libcharon-extra-plugins \
+        xl2tpd wireguard wireguard-tools dante-server \
+        openssh-server openssh-client
 
     # Install Node.js (proper version)
     install_nodejs
 
+    # Install Xray-core
+    info "Installing Xray..."
+    if ! command -v xray &>/dev/null; then
+        bash -c 'curl -sL https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh | bash -s -- install' || warn "Xray installation failed"
+    fi
+
+    # Install DNSTT-server (Robust install with checksum verification)
+    info "Installing DNSTT..."
+    if [ ! -f "/usr/local/bin/dnstt-server" ]; then
+        DURL="https://dnstt.network"
+        ARCH=$(uname -m)
+        if [ "$ARCH" = "x86_64" ]; then DARCH="amd64"; elif [ "$ARCH" = "aarch64" ]; then DARCH="arm64"; else DARCH="386"; fi
+        DFILE="dnstt-server-linux-${DARCH}"
+        
+        info "Downloading DNSTT from ${DURL}/${DFILE}..."
+        curl -L -o "/tmp/${DFILE}" "${DURL}/${DFILE}"
+        curl -L -s -o "/tmp/SHA256SUMS" "${DURL}/SHA256SUMS"
+        
+        cd /tmp
+        if sha256sum -c <(grep "${DFILE}" SHA256SUMS) 2>/dev/null; then
+            mv "/tmp/${DFILE}" "/usr/local/bin/dnstt-server"
+            chmod +x "/usr/local/bin/dnstt-server"
+            info "DNSTT verified and installed"
+        else
+            warn "DNSTT checksum verification failed! Attempting insecure install..."
+            wget -qO /usr/local/bin/dnstt-server "${DURL}/${DFILE}" || warn "DNSTT download failed"
+            chmod +x /usr/local/bin/dnstt-server
+        fi
+        cd - >/dev/null
+    fi
+
     # Enable and start Redis
     systemctl enable redis-server || true
     systemctl start redis-server || true
-
-    # Verify Redis is running
-    if redis-cli ping &>/dev/null; then
-        log "Redis is running"
-    else
-        warn "Redis may not be running. Will continue anyway."
-    fi
 
     log "Dependencies installed"
 }

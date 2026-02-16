@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "candyconnect-vpn",
+  "productName": "CandyConnect",
   "version": "0.1.0",
   "identifier": "com.candyconnect.vpn",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "CandyConnect VPN",
+        "title": "CandyConnect",
         "width": 650,
         "height": 800,
         "resizable": false,

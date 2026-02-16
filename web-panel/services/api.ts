@@ -111,6 +111,7 @@ export interface Client {
   time_used: number;
   created_at: string; expires_at: string;
   protocols: ClientProtocols;
+  protocol_data: Record<string, any>;
   last_connected_ip: string | null; last_connected_time: string | null;
   connection_history: ConnectionHistoryEntry[];
 }

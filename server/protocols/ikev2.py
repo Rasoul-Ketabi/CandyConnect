@@ -17,15 +17,12 @@ class IKEv2Protocol(BaseProtocol):
 
     async def install(self) -> bool:
         try:
-            await add_log("INFO", self.PROTOCOL_NAME, "Installing strongSwan (IKEv2)...")
+            await add_log("INFO", self.PROTOCOL_NAME, "Configuring strongSwan (IKEv2)...")
 
-            rc, _, err = await self._run_cmd(
-                "sudo apt update && sudo apt install strongswan strongswan-pki libcharon-extra-plugins -y",
-                check=False,
-            )
-            if rc != 0:
-                await add_log("ERROR", self.PROTOCOL_NAME, f"Installation failed: {err}")
-                return False
+            # Check if installed
+            if not await self._is_installed("ipsec"):
+                if not await self._apt_install("strongswan strongswan-pki libcharon-extra-plugins"):
+                    return False
 
             # Create directories
             for d in ["cacerts", "certs", "private"]:
@@ -83,17 +80,15 @@ class IKEv2Protocol(BaseProtocol):
 
             await self._write_config(config)
 
+            # Try systemctl
             await self._run_cmd("sudo systemctl enable strongswan-starter", check=False)
             rc, _, err = await self._run_cmd("sudo systemctl start strongswan-starter", check=False)
 
             if rc != 0:
-                # Try direct call (docker-friendly)
-                await self._run_cmd("sudo ipsec restart", check=False)
+                # Docker fallback
+                await self._run_cmd("sudo ipsec start", check=False)
 
-            running = await self._is_service_active("strongswan-starter") or \
-                      await self.is_running()
-
-            if running:
+            if await self.is_running():
                 version = await self.get_version()
                 await set_core_status(self.PROTOCOL_ID, {
                     "status": "running",
@@ -127,8 +122,11 @@ class IKEv2Protocol(BaseProtocol):
             return False
 
     async def is_running(self) -> bool:
-        return await self._is_service_active("strongswan-starter") or \
-               await self._is_service_active("ipsec")
+        if await self._is_service_active("strongswan-starter") or await self._is_service_active("ipsec"):
+            return True
+        # Strongswan process is usually 'charon'
+        rc, _, _ = await self._run_cmd("pgrep charon", check=False)
+        return rc == 0
 
     async def get_version(self) -> str:
         rc, out, _ = await self._run_cmd("ipsec --version", check=False)

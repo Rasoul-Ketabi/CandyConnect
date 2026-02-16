@@ -13,16 +13,15 @@ class L2TPProtocol(BaseProtocol):
 
     async def install(self) -> bool:
         try:
-            await add_log("INFO", self.PROTOCOL_NAME, "Installing L2TP/IPSec...")
-            rc, _, err = await self._run_cmd(
-                "sudo apt update && sudo apt install xl2tpd strongswan -y",
-                check=False,
-            )
-            if rc != 0:
-                await add_log("ERROR", self.PROTOCOL_NAME, f"Installation failed: {err}")
-                return False
+            await add_log("INFO", self.PROTOCOL_NAME, "Configuring L2TP/IPSec...")
+            
+            # Check if installed
+            if not await self._is_installed("xl2tpd"):
+                if not await self._apt_install("xl2tpd strongswan"):
+                    return False
+                    
             await self._run_cmd("sudo sysctl -w net.ipv4.ip_forward=1", check=False)
-            await add_log("INFO", self.PROTOCOL_NAME, "L2TP/IPSec installed successfully")
+            await add_log("INFO", self.PROTOCOL_NAME, "L2TP/IPSec configured successfully")
             return True
         except Exception as e:
             await add_log("ERROR", self.PROTOCOL_NAME, f"Installation error: {e}")
@@ -35,24 +34,26 @@ class L2TPProtocol(BaseProtocol):
                 await add_log("ERROR", self.PROTOCOL_NAME, "No L2TP config found")
                 return False
             await self._write_config(config)
-            await self._run_cmd("sudo systemctl enable xl2tpd && sudo systemctl start xl2tpd", check=False)
             
-            # Check if running, if not try direct call
-            if not await self._is_service_active("xl2tpd"):
-                await self._start_process("xl2tpd -D")
-                
-            running = await self._is_service_active("xl2tpd") or await self.is_running()
-            if running:
+            # Try systemctl
+            rc, _, err = await self._run_cmd("sudo systemctl enable xl2tpd && sudo systemctl start xl2tpd", check=False)
+            
+            if rc != 0:
+                # Fallback: direct start
+                pid = await self._start_process("xl2tpd -D")
+                if not pid:
+                    await add_log("ERROR", self.PROTOCOL_NAME, "L2TP failed to start")
+                    return False
+            else:
+                # Track for status
                 version = await self.get_version()
                 await set_core_status(self.PROTOCOL_ID, {
                     "status": "running", "pid": None,
                     "started_at": int(time.time()), "version": version,
                 })
-                await add_log("INFO", self.PROTOCOL_NAME, "L2TP started")
-                return True
-            else:
-                await add_log("ERROR", self.PROTOCOL_NAME, "L2TP failed to start")
-                return False
+
+            await add_log("INFO", self.PROTOCOL_NAME, "L2TP started")
+            return True
         except Exception as e:
             await add_log("ERROR", self.PROTOCOL_NAME, f"Failed to start: {e}")
             return False
@@ -60,6 +61,10 @@ class L2TPProtocol(BaseProtocol):
     async def stop(self) -> bool:
         try:
             await self._run_cmd("sudo systemctl stop xl2tpd", check=False)
+            await self._run_cmd("sudo pkill xl2tpd", check=False)
+            await self._run_cmd("sudo systemctl stop ipsec", check=False)
+            await self._run_cmd("sudo ipsec stop", check=False)
+            
             status = await get_core_status(self.PROTOCOL_ID)
             await set_core_status(self.PROTOCOL_ID, {
                 "status": "stopped", "pid": None,
@@ -72,7 +77,10 @@ class L2TPProtocol(BaseProtocol):
             return False
 
     async def is_running(self) -> bool:
-        return await self._is_service_active("xl2tpd")
+        if await self._is_service_active("xl2tpd"):
+            return True
+        rc, _, _ = await self._run_cmd("pgrep xl2tpd", check=False)
+        return rc == 0
 
     async def get_version(self) -> str:
         rc, out, _ = await self._run_cmd("xl2tpd --version 2>&1 || dpkg -s xl2tpd | grep Version", check=False)
@@ -182,8 +190,9 @@ connect-delay 5000
 """
         with open("/tmp/cc_l2tp_ipsec.conf", "w") as f:
             f.write(ipsec_conf)
+        await self._run_cmd("sudo mkdir -p /etc/ipsec.d", check=False)
         await self._run_cmd(
-            "sudo cp /tmp/cc_l2tp_ipsec.conf /etc/ipsec.d/l2tp.conf 2>/dev/null || true",
+            "sudo cp /tmp/cc_l2tp_ipsec.conf /etc/ipsec.d/l2tp.conf",
             check=False,
         )
 

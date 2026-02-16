@@ -35,9 +35,3 @@ export const protocolIcon = (id: string) => {
     }
 };
 
-export const generateUUID = (str: string) => {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) hash = ((hash << 5) - hash) + str.charCodeAt(i);
-    const hex = Math.abs(hash).toString(16).padStart(8, '0');
-    return `${hex.substr(0, 8)}-${hex.substr(0, 4)}-4${hex.substr(1, 3)}-a${hex.substr(4, 3)}-${hex.padEnd(12, '0').substr(0, 12)}`;
-};

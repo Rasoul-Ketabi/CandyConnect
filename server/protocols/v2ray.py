@@ -18,39 +18,28 @@ class V2RayProtocol(BaseProtocol):
 
     async def install(self) -> bool:
         try:
-            await add_log("INFO", self.PROTOCOL_NAME, "Installing Xray...")
+            await add_log("INFO", self.PROTOCOL_NAME, "Checking for Xray...")
             os.makedirs(self.XRAY_DIR, exist_ok=True)
 
-            # Download latest Xray from GitHub
-            rc, out, err = await self._run_cmd(
-                "bash -c 'curl -sL https://api.github.com/repos/XTLS/Xray-core/releases/latest "
-                "| grep browser_download_url | grep linux-64 | head -1 | cut -d\\\"  -f4'",
-                check=False,
-            )
-            if rc != 0 or not out:
-                # Fallback: use install script (ensures curl present)
-                await self._run_cmd("sudo apt update && sudo apt install -y curl", check=False)
-                rc, _, err = await self._run_cmd(
-                    "bash -c 'curl -sL https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh | bash -s -- install'",
-                    check=False,
-                )
-                if rc != 0:
-                    await add_log("ERROR", self.PROTOCOL_NAME, f"Installation failed: {err}")
-                    return False
-                # Link the binary
-                await self._run_cmd(f"ln -sf /usr/local/bin/xray {self.XRAY_BIN}", check=False)
-            else:
-                # Ensure curl and unzip exist for manual download path
-                await self._run_cmd("sudo apt update && sudo apt install -y curl unzip", check=False)
-                download_url = out.strip()
-                zip_path = os.path.join(self.XRAY_DIR, "xray.zip")
-                await self._run_cmd(f"curl -sL -o {zip_path} '{download_url}'")
-                await self._run_cmd(f"unzip -o {zip_path} -d {self.XRAY_DIR}")
-                await self._run_cmd(f"chmod +x {self.XRAY_BIN}")
-                await self._run_cmd(f"rm -f {zip_path}")
+            # 1. Check if already installed
+            for path in ["xray", "/usr/bin/xray", "/usr/local/bin/xray", self.XRAY_BIN]:
+                if await self._is_installed(path) or os.path.exists(path):
+                    await add_log("INFO", self.PROTOCOL_NAME, f"Xray found at {path}")
+                    return True
 
-            await add_log("INFO", self.PROTOCOL_NAME, "Xray installed successfully")
-            return True
+            # 2. If not found, try quick install without apt update (assume dependencies met)
+            await add_log("INFO", self.PROTOCOL_NAME, "Xray not found, attempting fast install...")
+            rc, _, err = await self._run_cmd(
+                "bash -c 'curl -sL https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh | sudo bash -s -- install'",
+                check=False,
+                timeout=120,
+            )
+            if rc == 0:
+                await add_log("INFO", self.PROTOCOL_NAME, "Xray installed successfully")
+                return True
+                
+            await add_log("ERROR", self.PROTOCOL_NAME, f"Installation failed (no apt update): {err}")
+            return False
         except Exception as e:
             await add_log("ERROR", self.PROTOCOL_NAME, f"Installation error: {e}")
             return False
@@ -156,6 +145,10 @@ class V2RayProtocol(BaseProtocol):
 
             config["config_json"] = json.dumps(config_obj, indent=2)
             await update_core_config("v2ray", config)
+
+            # Restart if running to apply changes
+            if await self.is_running():
+                await self.restart()
 
         except json.JSONDecodeError:
             pass

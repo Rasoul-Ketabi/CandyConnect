@@ -52,9 +52,12 @@ class ProtocolManager:
         # 1. Start Protocols
         for pid in ["v2ray", "wireguard", "openvpn", "ikev2", "l2tp", "dnstt"]:
             try:
-                await self.install_protocol(pid)
-                await self.start_protocol(pid)
-                logger.info(f"Auto-started protocol: {pid}")
+                installed = await self.install_protocol(pid)
+                started = await self.start_protocol(pid)
+                if started:
+                    logger.info(f"Auto-started protocol: {pid}")
+                else:
+                    logger.warning(f"Failed to auto-start protocol: {pid}")
             except Exception as e:
                 logger.error(f"Failed to auto-start protocol {pid}: {e}")
 

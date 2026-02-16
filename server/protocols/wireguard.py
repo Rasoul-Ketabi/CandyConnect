@@ -16,14 +16,12 @@ class WireGuardProtocol(BaseProtocol):
 
     async def install(self) -> bool:
         try:
-            await add_log("INFO", self.PROTOCOL_NAME, "Installing WireGuard...")
-            rc, _, err = await self._run_cmd(
-                "sudo apt update && sudo apt install wireguard wireguard-tools -y",
-                check=False,
-            )
-            if rc != 0:
-                await add_log("ERROR", self.PROTOCOL_NAME, f"Installation failed: {err}")
-                return False
+            await add_log("INFO", self.PROTOCOL_NAME, "Configuring WireGuard...")
+            
+            # Check if installed
+            if not await self._is_installed("wg"):
+                if not await self._apt_install("wireguard wireguard-tools"):
+                    return False
 
             # Enable IP forwarding
             await self._run_cmd("sudo sysctl -w net.ipv4.ip_forward=1", check=False)

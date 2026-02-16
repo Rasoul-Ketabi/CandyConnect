@@ -148,6 +148,15 @@ class BaseProtocol:
             cwd=cwd,
         )
         pid = self._process.pid
+        
+        # Wait a moment to see if it crashes early
+        await asyncio.sleep(1.5)
+        if self._process.returncode is not None:
+            _, err = await self._process.communicate()
+            err_msg = err.decode("utf-8", errors="replace").strip()
+            await add_log("ERROR", self.PROTOCOL_NAME, f"Process died immediately: {err_msg}")
+            return None
+
         await set_core_status(self.PROTOCOL_ID, {
             "status": "running",
             "pid": pid,
@@ -158,9 +167,39 @@ class BaseProtocol:
         return pid
 
     async def _is_installed(self, binary: str) -> bool:
-        """Check if a binary is available."""
+        """Check if a binary is available, checking common system paths as well."""
+        # 1. Try 'which'
         rc, _, _ = await self._run_cmd(f"which {binary}", check=False)
-        return rc == 0
+        if rc == 0:
+            return True
+        
+        # 2. Check common system paths explicitly (important for sbin)
+        search_paths = ["/usr/sbin", "/sbin", "/usr/local/sbin", "/usr/bin", "/bin"]
+        for p in search_paths:
+            if os.path.exists(os.path.join(p, binary)):
+                return True
+        return False
+
+    async def _apt_install(self, packages: str) -> bool:
+        """Helper to run apt install with retries for lock issues."""
+        max_retries = 5
+        for i in range(max_retries):
+            # Use -o DPkg::Lock::Timeout=60 if supported, but manual retry is safer
+            rc, out, err = await self._run_cmd(f"sudo apt install -y {packages}", check=False, timeout=180)
+            if rc == 0:
+                return True
+            
+            # Check for lock error
+            if "Could not get lock" in err or "Unable to lock" in err:
+                await add_log("WARNING", self.PROTOCOL_NAME, f"Apt lock held, retry {i+1}/{max_retries}...")
+                await asyncio.sleep(10)
+                continue
+            
+            # Other error
+            await add_log("ERROR", self.PROTOCOL_NAME, f"Apt install failed: {err}")
+            return False
+            
+        return False
 
     async def _systemctl(self, action: str, service: str) -> bool:
         """Run systemctl action."""
