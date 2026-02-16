@@ -6,7 +6,7 @@ WORKDIR /build/web-panel
 # Copy package files first for better caching
 COPY web-panel/package.json web-panel/package-lock.json* ./
 
-RUN npm install --legacy-peer-deps
+RUN npm install --legacy-peer-deps 2>&1
 
 # Copy the rest of the web panel source
 COPY web-panel/ ./
@@ -23,6 +23,8 @@ LABEL maintainer="CandyConnect"
 LABEL description="CandyConnect VPN Server Panel"
 
 # Install system dependencies needed by protocol managers
+# NOTE: dante-server is NOT available on Debian bookworm (python:3.12-slim base).
+#       We skip it since SOCKS proxy can be handled differently.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         wget \
@@ -41,21 +43,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         strongswan-pki \
         libcharon-extra-plugins \
         xl2tpd \
-        dante-server \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Xray
-RUN bash -c 'curl -sL https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh | bash -s -- install' && \
-    ln -sf /usr/local/bin/xray /usr/bin/xray
+# Install Xray (with error handling - non-fatal if it fails)
+RUN bash -c 'curl -sL https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh | bash -s -- install' \
+    && ln -sf /usr/local/bin/xray /usr/bin/xray \
+    || echo "WARNING: Xray installation failed. V2Ray protocol will not be available."
 
-# Install DNSTT (Download official binary like dnstt-deploy.sh)
+# Install DNSTT (non-fatal if download fails)
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then DNSTT_ARCH="amd64"; \
     elif [ "$ARCH" = "aarch64" ]; then DNSTT_ARCH="arm64"; \
     elif [ "$ARCH" = "armv7l" ]; then DNSTT_ARCH="arm"; \
     else DNSTT_ARCH="386"; fi && \
-    curl -L -o /usr/local/bin/dnstt-server https://dnstt.network/dnstt-server-linux-${DNSTT_ARCH} && \
-    chmod +x /usr/local/bin/dnstt-server
+    ( curl -L --fail -o /usr/local/bin/dnstt-server \
+        https://www.bamsoftware.com/software/dnstt/dnstt-server-linux-${DNSTT_ARCH} && \
+      chmod +x /usr/local/bin/dnstt-server ) \
+    || echo "WARNING: DNSTT download failed. DNSTT protocol will not be available."
 
 # Set up app directory structure (mirrors install.sh layout)
 ENV CC_DATA_DIR=/opt/candyconnect
@@ -87,10 +91,10 @@ ENV CC_PANEL_PATH=/candyconnect
 ENV CC_ADMIN_USER=admin
 ENV CC_ADMIN_PASS=admin123
 
-EXPOSE ${CC_PANEL_PORT}
+EXPOSE 8443
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -sf http://localhost:${CC_PANEL_PORT}/health || exit 1
 
 # Start the server via uvicorn

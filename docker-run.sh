@@ -20,11 +20,18 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-COMPOSE_CMD="docker compose"
-# Fallback to docker-compose if docker compose is not available
-if ! $COMPOSE_CMD version &>/dev/null 2>&1; then
-    COMPOSE_CMD="docker-compose"
-fi
+# Detect compose command
+COMPOSE_CMD=""
+detect_compose() {
+    if docker compose version &>/dev/null 2>&1; then
+        COMPOSE_CMD="docker compose"
+    elif command -v docker-compose &>/dev/null; then
+        COMPOSE_CMD="docker-compose"
+    else
+        echo -e "${RED}[✗]${NC} Neither 'docker compose' nor 'docker-compose' found. Please install Docker."
+        exit 1
+    fi
+}
 
 banner() {
     echo -e "${BOLD}${CYAN}"
@@ -39,20 +46,30 @@ banner() {
 ensure_env() {
     if [ ! -f ".env" ]; then
         echo -e "${YELLOW}[!]${NC} No .env file found. Creating with defaults..."
-        JWT_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))" 2>/dev/null || openssl rand -base64 48)
+        JWT_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))" 2>/dev/null || openssl rand -base64 48 || echo "CHANGE-ME-$(date +%s)")
         cat > .env << EOF
 CC_PANEL_PORT=8443
 CC_PANEL_PATH=/candyconnect
 CC_ADMIN_USER=admin
 CC_ADMIN_PASS=admin123
 CC_JWT_SECRET=${JWT_SECRET}
+CC_REDIS_URL=redis://redis:6379/0
 EOF
         echo -e "${GREEN}[✓]${NC} .env file created"
     fi
 }
 
+# Check if Docker daemon is running
+check_docker() {
+    if ! docker info &>/dev/null; then
+        echo -e "${RED}[✗]${NC} Docker daemon is not running. Please start Docker first."
+        exit 1
+    fi
+}
+
 start() {
     banner
+    check_docker
     ensure_env
     echo -e "${CYAN}[i]${NC} Building and starting CandyConnect..."
     $COMPOSE_CMD up -d --build
@@ -71,22 +88,26 @@ start() {
 }
 
 stop() {
+    check_docker
     echo -e "${CYAN}[i]${NC} Stopping CandyConnect..."
     $COMPOSE_CMD down
     echo -e "${GREEN}[✓]${NC} Stopped"
 }
 
 logs() {
+    check_docker
     $COMPOSE_CMD logs -f --tail=100
 }
 
 restart() {
+    check_docker
     echo -e "${CYAN}[i]${NC} Restarting CandyConnect..."
     $COMPOSE_CMD restart
     echo -e "${GREEN}[✓]${NC} Restarted"
 }
 
 rebuild() {
+    check_docker
     echo -e "${CYAN}[i]${NC} Rebuilding from scratch..."
     $COMPOSE_CMD down
     $COMPOSE_CMD build --no-cache
@@ -95,14 +116,18 @@ rebuild() {
 }
 
 status() {
+    check_docker
     $COMPOSE_CMD ps
 }
 
 open_shell() {
+    check_docker
     docker exec -it candyconnect-server /bin/bash
 }
 
 # ── Main ──
+detect_compose
+
 case "${1:-start}" in
     start)   start ;;
     stop)    stop ;;

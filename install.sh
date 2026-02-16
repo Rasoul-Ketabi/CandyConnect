@@ -4,7 +4,7 @@
 # Deploys server core + web panel on Ubuntu/Debian
 # ═══════════════════════════════════════════════════════════
 
-set -e
+set -euo pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -47,6 +47,33 @@ check_os() {
     log "OS check passed"
 }
 
+install_nodejs() {
+    info "Checking Node.js version..."
+    local NEED_INSTALL=false
+
+    if command -v node &>/dev/null; then
+        NODE_VER=$(node -v 2>/dev/null | sed 's/v//' | cut -d. -f1)
+        if [ "$NODE_VER" -lt 18 ] 2>/dev/null; then
+            warn "Node.js version $NODE_VER is too old (need 18+). Upgrading..."
+            NEED_INSTALL=true
+        else
+            log "Node.js $(node -v) is already installed"
+        fi
+    else
+        NEED_INSTALL=true
+    fi
+
+    if [ "$NEED_INSTALL" = true ]; then
+        info "Installing Node.js 20 from NodeSource..."
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash - || {
+            warn "NodeSource setup failed, trying alternative method..."
+            apt install -y nodejs npm
+        }
+        apt install -y nodejs
+        log "Node.js $(node -v) installed"
+    fi
+}
+
 install_dependencies() {
     info "Installing system dependencies..."
     apt update -y
@@ -54,13 +81,24 @@ install_dependencies() {
         python3 python3-pip python3-venv \
         redis-server \
         curl wget unzip git \
-        nodejs npm \
         iptables \
-        sudo
+        sudo \
+        ca-certificates gnupg
+
+    # Install Node.js (proper version)
+    install_nodejs
 
     # Enable and start Redis
-    systemctl enable redis-server
-    systemctl start redis-server
+    systemctl enable redis-server || true
+    systemctl start redis-server || true
+
+    # Verify Redis is running
+    if redis-cli ping &>/dev/null; then
+        log "Redis is running"
+    else
+        warn "Redis may not be running. Will continue anyway."
+    fi
+
     log "Dependencies installed"
 }
 
@@ -75,6 +113,11 @@ install_server() {
 
     # Copy server files
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+    if [ ! -d "$SCRIPT_DIR/server" ]; then
+        err "Server source directory not found at $SCRIPT_DIR/server"
+    fi
+
     cp -r "$SCRIPT_DIR/server/"* "$CC_SERVER_DIR/"
 
     # Create Python virtual environment
@@ -92,13 +135,22 @@ install_panel() {
 
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-    # Copy web-panel source
-    cp -r "$SCRIPT_DIR/web-panel/"* "$CC_PANEL_DIR/"
+    if [ ! -d "$SCRIPT_DIR/web-panel" ]; then
+        err "Web panel source directory not found at $SCRIPT_DIR/web-panel"
+    fi
+
+    # Copy web-panel source (exclude node_modules if present)
+    rsync -a --exclude='node_modules' --exclude='dist' "$SCRIPT_DIR/web-panel/" "$CC_PANEL_DIR/" 2>/dev/null || \
+        cp -r "$SCRIPT_DIR/web-panel/"* "$CC_PANEL_DIR/"
 
     # Install npm dependencies and build
     cd "$CC_PANEL_DIR"
     npm install --legacy-peer-deps
     npm run build
+
+    if [ ! -d "$CC_PANEL_DIR/dist" ]; then
+        err "Web panel build failed - dist directory not created"
+    fi
 
     log "Web panel built"
 }
@@ -107,7 +159,12 @@ generate_secrets() {
     info "Generating secrets..."
     JWT_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
 
-    # Write env file
+    # Write env file (only if it doesn't exist, to preserve user customizations)
+    if [ -f "$CC_DIR/.env" ]; then
+        warn ".env file already exists. Backing up to .env.bak"
+        cp "$CC_DIR/.env" "$CC_DIR/.env.bak"
+    fi
+
     cat > "$CC_DIR/.env" << EOF
 CC_DATA_DIR=$CC_DIR
 CC_REDIS_URL=redis://127.0.0.1:6379/0
@@ -125,6 +182,12 @@ EOF
 create_systemd_service() {
     info "Creating systemd service..."
 
+    # Stop existing service if running
+    if systemctl is-active --quiet "$CC_SERVICE" 2>/dev/null; then
+        info "Stopping existing $CC_SERVICE service..."
+        systemctl stop "$CC_SERVICE" || true
+    fi
+
     cat > /etc/systemd/system/${CC_SERVICE}.service << 'SERVICEEOF'
 [Unit]
 Description=CandyConnect VPN Server
@@ -140,7 +203,7 @@ Group=root
 WorkingDirectory=CC_SERVER_DIR_PLACEHOLDER
 EnvironmentFile=CC_DIR_PLACEHOLDER/.env
 ExecStartPre=/bin/bash -c 'redis-cli ping > /dev/null 2>&1 || sleep 5'
-ExecStart=CC_SERVER_DIR_PLACEHOLDER/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port ${CC_PANEL_PORT} --log-level info
+ExecStart=CC_SERVER_DIR_PLACEHOLDER/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port CC_PANEL_PORT_PLACEHOLDER --log-level info
 Restart=on-failure
 RestartSec=10
 StandardOutput=append:CC_DIR_PLACEHOLDER/logs/server.log
@@ -157,12 +220,19 @@ SERVICEEOF
     # Replace placeholders with actual paths
     sed -i "s|CC_SERVER_DIR_PLACEHOLDER|$CC_SERVER_DIR|g" /etc/systemd/system/${CC_SERVICE}.service
     sed -i "s|CC_DIR_PLACEHOLDER|$CC_DIR|g" /etc/systemd/system/${CC_SERVICE}.service
+    sed -i "s|CC_PANEL_PORT_PLACEHOLDER|$CC_PORT|g" /etc/systemd/system/${CC_SERVICE}.service
 
     systemctl daemon-reload
     systemctl enable "$CC_SERVICE"
     systemctl start "$CC_SERVICE"
 
-    log "Service created and started"
+    # Verify the service started
+    sleep 3
+    if systemctl is-active --quiet "$CC_SERVICE"; then
+        log "Service created and started"
+    else
+        warn "Service may not have started correctly. Check with: journalctl -u $CC_SERVICE -n 50"
+    fi
 }
 
 setup_firewall() {
@@ -180,6 +250,11 @@ setup_firewall() {
     sysctl -w net.ipv4.ip_forward=1
     grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf || \
         echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+
+    # Try to save iptables rules for persistence
+    if command -v iptables-save &>/dev/null; then
+        iptables-save > /etc/iptables.rules 2>/dev/null || true
+    fi
 
     log "Firewall configured"
 }

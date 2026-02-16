@@ -13,6 +13,14 @@ REM ═════════════════════════�
 
 setlocal enabledelayedexpansion
 
+REM Check if Docker is running
+docker info >nul 2>&1
+if !errorlevel! neq 0 (
+    echo [ERROR] Docker is not running. Please start Docker Desktop first.
+    pause
+    exit /b 1
+)
+
 if "%1"=="" goto :start
 if "%1"=="start" goto :start
 if "%1"=="stop" goto :stop
@@ -40,16 +48,22 @@ if not exist ".env" (
         echo CC_ADMIN_USER=admin
         echo CC_ADMIN_PASS=admin123
         echo CC_JWT_SECRET=change-me-to-a-random-string
+        echo CC_REDIS_URL=redis://redis:6379/0
     ) > .env
     echo [OK] .env file created - PLEASE edit CC_JWT_SECRET!
 )
 
 echo [i] Building and starting CandyConnect...
-docker compose up -d --build
+docker compose up -d --build 2>nul
 
 if !errorlevel! neq 0 (
     echo [!] 'docker compose' failed, trying 'docker-compose'...
     docker-compose up -d --build
+    if !errorlevel! neq 0 (
+        echo [ERROR] Failed to start. Check Docker installation.
+        pause
+        exit /b 1
+    )
 )
 
 echo.

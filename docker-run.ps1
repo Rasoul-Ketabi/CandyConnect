@@ -29,6 +29,16 @@ function Write-Banner {
     Write-Host ""
 }
 
+function Test-DockerRunning {
+    try {
+        $null = docker info 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "Docker not running" }
+    } catch {
+        Write-Host "[ERROR] Docker is not running. Please start Docker Desktop first." -ForegroundColor Red
+        exit 1
+    }
+}
+
 function Ensure-Env {
     if (-not (Test-Path ".env")) {
         Write-Host "[!] No .env file found. Creating with defaults..." -ForegroundColor Yellow
@@ -44,8 +54,9 @@ CC_PANEL_PATH=/candyconnect
 CC_ADMIN_USER=admin
 CC_ADMIN_PASS=admin123
 CC_JWT_SECRET=$jwtSecret
+CC_REDIS_URL=redis://redis:6379/0
 "@
-        Set-Content -Path ".env" -Value $envContent -Encoding UTF8
+        Set-Content -Path ".env" -Value $envContent -Encoding UTF8 -NoNewline
         Write-Host "[✓] .env file created" -ForegroundColor Green
     }
 }
@@ -54,9 +65,15 @@ function Get-ComposeCmd {
     # Try 'docker compose' (v2) first, then fall back to 'docker-compose'
     try {
         $null = docker compose version 2>&1
-        return "docker compose"
-    } catch {
+        if ($LASTEXITCODE -eq 0) { return "docker compose" }
+    } catch {}
+    
+    try {
+        $null = Get-Command docker-compose -ErrorAction Stop
         return "docker-compose"
+    } catch {
+        Write-Host "[ERROR] Neither 'docker compose' nor 'docker-compose' found." -ForegroundColor Red
+        exit 1
     }
 }
 
@@ -75,10 +92,14 @@ function Invoke-Compose {
     $cmd = Get-ComposeCmd
     $fullCmd = "$cmd $($Args -join ' ')"
     Invoke-Expression $fullCmd
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Command failed: $fullCmd" -ForegroundColor Red
+    }
 }
 
 function Start-CandyConnect {
     Write-Banner
+    Test-DockerRunning
     Ensure-Env
     
     Write-Host "[i] Building and starting CandyConnect..." -ForegroundColor Cyan
@@ -97,22 +118,26 @@ function Start-CandyConnect {
 }
 
 function Stop-CandyConnect {
+    Test-DockerRunning
     Write-Host "[i] Stopping CandyConnect..." -ForegroundColor Cyan
     Invoke-Compose @("down")
     Write-Host "[✓] Stopped" -ForegroundColor Green
 }
 
 function Show-Logs {
+    Test-DockerRunning
     Invoke-Compose @("logs", "-f", "--tail=100")
 }
 
 function Restart-CandyConnect {
+    Test-DockerRunning
     Write-Host "[i] Restarting CandyConnect..." -ForegroundColor Cyan
     Invoke-Compose @("restart")
     Write-Host "[✓] Restarted" -ForegroundColor Green
 }
 
 function Rebuild-CandyConnect {
+    Test-DockerRunning
     Write-Host "[i] Rebuilding from scratch..." -ForegroundColor Cyan
     Invoke-Compose @("down")
     Invoke-Compose @("build", "--no-cache")
@@ -121,10 +146,12 @@ function Rebuild-CandyConnect {
 }
 
 function Show-Status {
+    Test-DockerRunning
     Invoke-Compose @("ps")
 }
 
 function Open-Shell {
+    Test-DockerRunning
     docker exec -it candyconnect-server /bin/bash
 }
 
