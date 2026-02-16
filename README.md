@@ -256,6 +256,67 @@ curl http://<SERVER_IP>:8443/health
 
 ---
 
+## 🛠️ Advanced Protocol Management
+
+While the Web Panel automates most operations, you may occasionally need to perform manual tasks or low-level troubleshooting directly on the server.
+
+### 📁 Direct Configuration Paths
+
+If you need to edit core configs manually, they are located at:
+
+| Protocol | Config File / Directory |
+|---|---|
+| **WireGuard** | `/etc/wireguard/wg0.conf` |
+| **V2Ray / Xray** | `/opt/candyconnect/cores/xray/config.json` |
+| **OpenVPN** | `/etc/openvpn/server/server.conf` |
+| **IKEv2/IPSec** | `/etc/ipsec.conf` & `/etc/ipsec.secrets` |
+| **L2TP/IPSec** | `/etc/xl2tpd/xl2tpd.conf` |
+| **DNSTT** | `/opt/candyconnect/cores/dnstt/` |
+
+### 🔍 Native CLI Tools
+
+Use these native commands to debug connections or check real-time status:
+
+- **WireGuard**: `sudo wg show` (shows active peers and handshakes)
+- **Xray**: `sudo /opt/candyconnect/cores/xray/xray run -c /opt/candyconnect/cores/xray/config.json`
+- **IKEv2/IPSec**: `sudo ipsec statusall` or `sudo swanctl --list-conns`
+- **OpenVPN**: `sudo tail -f /var/log/openvpn/status.log`
+- **L2TP**: `sudo journalctl -u xl2tpd -f`
+- **DNSTT**: `ps aux | grep dnstt-server`
+
+### ⚡ Manual Service Control
+
+You can bypass the panel and manage services directly using `systemctl`:
+
+```bash
+# V2Ray (if using global xray)
+sudo systemctl restart xray
+
+# WireGuard interface
+sudo wg-quick down wg0
+sudo wg-quick up wg0
+
+# IPSec (IKEv2/L2TP)
+sudo systemctl restart strongswan-starter
+
+# L2TP Daemon
+sudo systemctl restart xl2tpd
+
+# SSH (for DNSTT tunnels)
+sudo systemctl restart ssh
+```
+
+### 🛑 Emergency Port Release
+
+If a protocol fails to start because "Port is already in use", identify the process:
+```bash
+sudo lsof -i :<PORT_NUMBER>
+# or
+sudo netstat -tulpn | grep :<PORT_NUMBER>
+```
+
+---
+
 ## 🔑 VPN Protocol Setup
 
 After installation, VPN protocols need to be installed and started via the web panel or API:
