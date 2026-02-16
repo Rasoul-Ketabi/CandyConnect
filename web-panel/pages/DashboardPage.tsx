@@ -31,10 +31,11 @@ const DashboardPage: React.FC = () => {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [logLimit, setLogLimit] = useState(10);
 
   const fetchData = async () => {
     try {
-      const d = await getDashboard();
+      const d = await getDashboard(logLimit);
       setData(d);
       setError('');
     } catch (e: any) {
@@ -48,7 +49,7 @@ const DashboardPage: React.FC = () => {
     fetchData();
     const interval = setInterval(fetchData, 15000);
     return () => clearInterval(interval);
-  }, []);
+  }, [logLimit]);
 
   if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-orange-500" /></div>;
   if (error || !data) return <div className="text-center py-20 text-red-500 font-medium">{error || 'Failed to load'}</div>;
@@ -211,9 +212,20 @@ const DashboardPage: React.FC = () => {
             <Activity className="w-4 h-4 text-slate-500" strokeWidth={2} />
             Recent Logs
           </h2>
-          <span className="text-[10px] text-slate-400 font-medium">{data.logs.length} entries</span>
+          <div className="flex items-center gap-3">
+            <select
+              value={logLimit}
+              onChange={(e) => setLogLimit(Number(e.target.value))}
+              className="text-[10px] font-bold bg-slate-50 dark:bg-slate-700 border-none rounded-lg px-2 py-1 text-slate-500 dark:text-slate-400 focus:ring-1 focus:ring-orange-500 outline-none cursor-pointer"
+            >
+              <option value={10}>10 Entries</option>
+              <option value={50}>50 Entries</option>
+              <option value={100}>100 Entries</option>
+            </select>
+            <span className="text-[10px] text-slate-400 font-medium">{data.logs.length} entries</span>
+          </div>
         </div>
-        <div className="max-h-80 overflow-y-auto space-y-0.5">
+        <div className="max-h-80 overflow-y-auto space-y-0.5 custom-scrollbar">
           {data.logs.map((log, i) => (
             <div key={i} className="flex items-start gap-3 py-2 border-b border-slate-100 dark:border-slate-700/50 last:border-b-0 text-xs hover:bg-slate-50 dark:hover:bg-slate-700/20 rounded px-1 transition-colors">
               {logLevelIcon(log.level)}

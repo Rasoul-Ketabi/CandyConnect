@@ -42,7 +42,8 @@ class L2TPProtocol(BaseProtocol):
                 # Fallback: direct start
                 pid = await self._start_process("xl2tpd -D")
                 if not pid:
-                    await add_log("ERROR", self.PROTOCOL_NAME, "L2TP failed to start")
+                    error_msg = err or "xl2tpd binary failed"
+                    await add_log("ERROR", self.PROTOCOL_NAME, f"Failed to start: {error_msg}")
                     return False
             else:
                 # Track for status
@@ -55,7 +56,7 @@ class L2TPProtocol(BaseProtocol):
             await add_log("INFO", self.PROTOCOL_NAME, "L2TP started")
             return True
         except Exception as e:
-            await add_log("ERROR", self.PROTOCOL_NAME, f"Failed to start: {e}")
+            await add_log("ERROR", self.PROTOCOL_NAME, f"Start exception: {e}")
             return False
 
     async def stop(self) -> bool:

@@ -86,7 +86,11 @@ class IKEv2Protocol(BaseProtocol):
 
             if rc != 0:
                 # Docker fallback
-                await self._run_cmd("sudo ipsec start", check=False)
+                rc2, _, err2 = await self._run_cmd("sudo ipsec start", check=False)
+                if rc2 != 0 and not await self.is_running():
+                    error_msg = err2 or err or "StrongSwan failed to start"
+                    await add_log("ERROR", self.PROTOCOL_NAME, f"Failed to start: {error_msg}")
+                    return False
 
             if await self.is_running():
                 version = await self.get_version()
@@ -99,10 +103,10 @@ class IKEv2Protocol(BaseProtocol):
                 await add_log("INFO", self.PROTOCOL_NAME, "IKEv2 started")
                 return True
             else:
-                await add_log("ERROR", self.PROTOCOL_NAME, "IKEv2 failed to start")
+                await add_log("ERROR", self.PROTOCOL_NAME, "IKEv2 failed to start (no process running)")
                 return False
         except Exception as e:
-            await add_log("ERROR", self.PROTOCOL_NAME, f"Failed to start: {e}")
+            await add_log("ERROR", self.PROTOCOL_NAME, f"Start exception: {e}")
             return False
 
     async def stop(self) -> bool:

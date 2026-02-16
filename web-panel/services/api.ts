@@ -204,10 +204,14 @@ export interface CoreConfigs {
     api_enabled: boolean; api_port: number;
   };
   wireguard: {
-    interfaces: {
-      id: string; name: string; listen_port: number; dns: string; address: string;
-      private_key: string; public_key: string; mtu: number; post_up: string; post_down: string;
-    }[];
+    listen_port: number;
+    dns: string;
+    address: string;
+    private_key: string;
+    public_key: string;
+    mtu: number;
+    post_up: string;
+    post_down: string;
   };
   v2ray: { config_json: string };
   openvpn: {
@@ -224,8 +228,11 @@ export interface CoreConfigs {
     dns: string; mtu: number; mru: number;
   };
   dnstt: {
-    listen_port: number; domain: string; upstream_dns: string; public_key: string;
-    ttl: number; max_payload: number;
+    listen_port: number;
+    domain: string;
+    public_key: string;
+    tunnel_mode: string;
+    mtu: number;
   };
   slipstream: {
     port: number; method: string; obfs: string; obfs_host: string;

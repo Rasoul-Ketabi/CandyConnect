@@ -45,11 +45,17 @@ class WireGuardProtocol(BaseProtocol):
 
             name = "wg0" # Use wg0 as primary
             await self._write_config(config)
+            
             await self._run_cmd(f"sudo systemctl enable wg-quick@{name}", check=False)
             rc, _, err = await self._run_cmd(f"sudo systemctl start wg-quick@{name}", check=False)
+            
             if rc != 0:
                 # Try bringing up directly
-                await self._run_cmd(f"sudo wg-quick up {name}", check=False)
+                rc2, _, err2 = await self._run_cmd(f"sudo wg-quick up {name}", check=False)
+                if rc2 != 0:
+                    error_msg = err2 or err or "Unknown WireGuard error"
+                    await add_log("ERROR", self.PROTOCOL_NAME, f"Failed to start: {error_msg}")
+                    return False
 
             version = await self.get_version()
             await set_core_status(self.PROTOCOL_ID, {
@@ -61,7 +67,7 @@ class WireGuardProtocol(BaseProtocol):
             await add_log("INFO", self.PROTOCOL_NAME, "WireGuard started")
             return True
         except Exception as e:
-            await add_log("ERROR", self.PROTOCOL_NAME, f"Failed to start: {e}")
+            await add_log("ERROR", self.PROTOCOL_NAME, f"Start exception: {e}")
             return False
 
     async def stop(self) -> bool:

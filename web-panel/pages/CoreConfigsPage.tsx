@@ -50,39 +50,34 @@ const WireGuardConfigPanel: React.FC<{
   save: (section: string, data: unknown, name: string) => Promise<void>;
   restart: (id: string, name: string) => Promise<void>;
 }> = ({ cfg, saving, save, restart }) => {
-  const [ifaces, setIfaces] = useState(cfg.wireguard.interfaces.map(i => ({ ...i })));
+  const [formData, setFormData] = useState({ ...cfg.wireguard });
 
   useEffect(() => {
-    setIfaces(cfg.wireguard.interfaces.map(i => ({ ...i })));
-  }, [cfg.wireguard.interfaces]);
+    setFormData({ ...cfg.wireguard });
+  }, [cfg.wireguard]);
 
   return (
     <Card className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <h3 className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2"><Shield className="w-5 h-5 text-blue-500" /> WireGuard Config</h3>
-        <button onClick={() => { const n = ifaces.length; setIfaces([...ifaces, { id: `wg${n}`, name: `wg${n}`, listen_port: 51820 + n, dns: '1.1.1.1', address: `10.${66 + n * 11}.${66 + n * 11}.1/24`, private_key: '', public_key: '', mtu: 1420, post_up: 'iptables -A FORWARD -i %i -j ACCEPT', post_down: 'iptables -D FORWARD -i %i -j ACCEPT' }]); }} className="px-3 py-1.5 rounded-lg text-xs font-bold text-orange-500 border border-orange-300 dark:border-orange-700 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors">+ Add Interface</button>
+      <div className="flex items-center justify-between">
+        <h3 className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+          <Shield className="w-5 h-5 text-blue-500" /> WireGuard Config (wg0)
+        </h3>
       </div>
-      {ifaces.map((iface, idx) => (
-        <div key={iface.id} className="bg-slate-50 dark:bg-slate-700/30 rounded-xl p-4 space-y-3 border border-slate-200/50 dark:border-slate-600/50">
-          <div className="flex items-center justify-between">
-            <span className="font-bold text-sm text-orange-500">{iface.name}</span>
-            {idx > 0 && <button onClick={() => setIfaces(ifaces.filter((_, i) => i !== idx))} className="text-xs text-red-500 font-bold">Remove</button>}
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div><Label>Name</Label><Input value={iface.name} onChange={e => { const u = [...ifaces]; u[idx] = { ...u[idx], name: e.target.value }; setIfaces(u); }} /></div>
-            <div><Label>Listen Port</Label><Input type="number" value={iface.listen_port} onChange={e => { const u = [...ifaces]; u[idx] = { ...u[idx], listen_port: +e.target.value }; setIfaces(u); }} /></div>
-            <div><Label>DNS</Label><Input value={iface.dns} onChange={e => { const u = [...ifaces]; u[idx] = { ...u[idx], dns: e.target.value }; setIfaces(u); }} /></div>
-            <div><Label>Address</Label><Input value={iface.address} onChange={e => { const u = [...ifaces]; u[idx] = { ...u[idx], address: e.target.value }; setIfaces(u); }} /></div>
-            <div><Label>MTU</Label><Input type="number" value={iface.mtu} onChange={e => { const u = [...ifaces]; u[idx] = { ...u[idx], mtu: +e.target.value }; setIfaces(u); }} /></div>
-            <div><Label>Public Key</Label><Input value={iface.public_key} readOnly style={{ opacity: 0.6 }} /></div>
-          </div>
-          <div><Label>PostUp</Label><Input value={iface.post_up} onChange={e => { const u = [...ifaces]; u[idx] = { ...u[idx], post_up: e.target.value }; setIfaces(u); }} /></div>
-          <div><Label>PostDown</Label><Input value={iface.post_down} onChange={e => { const u = [...ifaces]; u[idx] = { ...u[idx], post_down: e.target.value }; setIfaces(u); }} /></div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+        <div><Label>Listen Port</Label><Input type="number" value={formData.listen_port} onChange={e => setFormData({ ...formData, listen_port: +e.target.value })} /></div>
+        <div><Label>DNS Servers</Label><Input value={formData.dns} onChange={e => setFormData({ ...formData, dns: e.target.value })} /></div>
+        <div><Label>Internal Address</Label><Input value={formData.address} onChange={e => setFormData({ ...formData, address: e.target.value })} /></div>
+        <div><Label>MTU</Label><Input type="number" value={formData.mtu} onChange={e => setFormData({ ...formData, mtu: +e.target.value })} /></div>
+        <div className="sm:col-span-2">
+          <Label>Public Key (Read Only)</Label>
+          <Input value={formData.public_key} readOnly className="bg-slate-100 dark:bg-slate-800 opacity-70 font-mono text-[10px]" />
         </div>
-      ))}
+        <div className="sm:col-span-2"><Label>Post Up Command</Label><Input value={formData.post_up} onChange={e => setFormData({ ...formData, post_up: e.target.value })} /></div>
+        <div className="sm:col-span-2"><Label>Post Down Command</Label><Input value={formData.post_down} onChange={e => setFormData({ ...formData, post_down: e.target.value })} /></div>
+      </div>
       <div className="border-t border-slate-200 dark:border-slate-700 pt-4 flex flex-wrap gap-3">
-        <BtnPrimary disabled={saving} onClick={() => save('wireguard', { interfaces: ifaces }, 'WireGuard')}>Save Config</BtnPrimary>
-        <BtnWarn onClick={() => restart('wireguard', 'WireGuard')}>Restart WireGuard</BtnWarn>
+        <BtnPrimary disabled={saving} onClick={() => save('wireguard', formData, 'WireGuard')}>Save Config</BtnPrimary>
+        <BtnWarn onClick={() => restart('wireguard', 'WireGuard')}>Restart Service</BtnWarn>
       </div>
     </Card>
   );
@@ -91,7 +86,7 @@ const WireGuardConfigPanel: React.FC<{
 // Extracted as a proper component to handle mutable form state correctly
 const SimpleConfigPanel: React.FC<{
   id: string; title: string; cfg: CoreConfigs; cores: VpnCore[]; saving: boolean;
-  fields: { label: string; key: string; type?: string; options?: string[]; value: any }[];
+  fields: { label: string; key: string; type?: string; options?: string[]; value: any; readOnly?: boolean }[];
   toggles: { label: string; key: string; value: boolean }[];
   save: (section: string, data: unknown, name: string) => Promise<void>;
   restart: (id: string, name: string) => Promise<void>;
@@ -119,7 +114,7 @@ const SimpleConfigPanel: React.FC<{
             <Label>{f.label}</Label>
             {f.options
               ? <Select value={formData[f.key] ?? f.value} options={f.options} onChange={e => setFormData(prev => ({ ...prev, [f.key]: e.target.value }))} />
-              : <Input type={f.type || 'text'} value={formData[f.key] ?? f.value} onChange={e => setFormData(prev => ({ ...prev, [f.key]: f.type === 'number' ? +e.target.value : e.target.value }))} />
+              : <Input type={f.type || 'text'} value={formData[f.key] ?? f.value} readOnly={f.readOnly} onChange={e => !f.readOnly && setFormData(prev => ({ ...prev, [f.key]: f.type === 'number' ? +e.target.value : e.target.value }))} />
             }
           </div>
         ))}
@@ -268,6 +263,7 @@ const CoreConfigsPage: React.FC = () => {
         { label: 'NAT Port', key: 'nat_port', type: 'number', value: cfg.ikev2.nat_port },
         { label: 'Cipher Suite', key: 'cipher', value: cfg.ikev2.cipher },
         { label: 'SA Lifetime', key: 'lifetime', value: cfg.ikev2.lifetime },
+        { label: 'Margin Time', key: 'margintime', value: cfg.ikev2.margintime },
         { label: 'DNS', key: 'dns', value: cfg.ikev2.dns },
         { label: 'Subnet', key: 'subnet', value: cfg.ikev2.subnet },
         { label: 'Cert Validity (days)', key: 'cert_validity', type: 'number', value: cfg.ikev2.cert_validity },
@@ -280,14 +276,14 @@ const CoreConfigsPage: React.FC = () => {
         { label: 'Remote Range', key: 'remote_range', value: cfg.l2tp.remote_range },
         { label: 'DNS', key: 'dns', value: cfg.l2tp.dns },
         { label: 'MTU', key: 'mtu', type: 'number', value: cfg.l2tp.mtu },
+        { label: 'MRU', key: 'mru', type: 'number', value: cfg.l2tp.mru },
       ]);
       case 'dnstt': return renderSimpleConfig('dnstt', 'DNSTT', [
         { label: 'Listen Port', key: 'listen_port', type: 'number', value: cfg.dnstt.listen_port },
         { label: 'Domain', key: 'domain', value: cfg.dnstt.domain },
-        { label: 'Upstream DNS', key: 'upstream_dns', value: cfg.dnstt.upstream_dns },
-        { label: 'Public Key', key: 'public_key', value: cfg.dnstt.public_key },
-        { label: 'TTL', key: 'ttl', type: 'number', value: cfg.dnstt.ttl },
-        { label: 'Max Payload', key: 'max_payload', type: 'number', value: cfg.dnstt.max_payload },
+        { label: 'Tunnel Mode', key: 'tunnel_mode', options: ['ssh', 'socks'], value: cfg.dnstt.tunnel_mode },
+        { label: 'MTU', key: 'mtu', type: 'number', value: cfg.dnstt.mtu },
+        { label: 'Public Key', key: 'public_key', value: cfg.dnstt.public_key, readOnly: true },
       ]);
       case 'slipstream': return renderSimpleConfig('slipstream', 'SlipStream', [
         { label: 'Port', key: 'port', type: 'number', value: cfg.slipstream.port },

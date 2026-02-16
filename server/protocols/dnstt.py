@@ -121,16 +121,16 @@ class DNSTTProtocol(BaseProtocol):
 
             # Start dnstt-server
             pid = await self._start_process(
-                f"{dnstt_bin} -udp :{listen_port} -privkey-file {priv_key} -mtu {mtu} {domain} 127.0.0.1:{target_port}",
+                f'"{dnstt_bin}" -udp :{listen_port} -privkey-file "{priv_key}" -mtu {mtu} {domain} 127.0.0.1:{target_port}',
                 cwd=self.DNSTT_DIR,
             )
             
             if not pid:
-                await add_log("ERROR", self.PROTOCOL_NAME, "Failed to start DNSTT process")
+                await add_log("ERROR", self.PROTOCOL_NAME, "Failed to start DNSTT process (check binary permissions/paths)")
                 return False
             return True
         except Exception as e:
-            await add_log("ERROR", self.PROTOCOL_NAME, f"Failed to start: {e}")
+            await add_log("ERROR", self.PROTOCOL_NAME, f"Start exception: {e}")
             return False
 
     async def stop(self) -> bool:
@@ -172,11 +172,13 @@ class DNSTTProtocol(BaseProtocol):
         iface = iface.strip() or "eth0"
         
         config_path = "/etc/danted.conf"
-        # Use single quotes for the multiline string to avoid f-string escaping issues
         content = f"logoutput: syslog\nuser.privileged: root\nuser.unprivileged: nobody\n\ninternal: 127.0.0.1 port = 1080\nexternal: {iface}\nsocksmethod: none\ncompatibility: sameport\nextension: bind\n\nclient pass {{\n    from: 127.0.0.1/8 to: 0.0.0.0/0\n    log: error\n}}\n\nsocks pass {{\n    from: 127.0.0.1/8 to: 0.0.0.0/0\n    command: bind connect udpassociate\n    log: error\n}}\n"
         
-        # Backup and write
-        await self._run_cmd(f"echo '{content}' | sudo tee {config_path}", check=False)
+        # Safer write: write to tmp then move
+        with open("/tmp/cc_danted.conf", "w") as f:
+            f.write(content)
+        
+        await self._run_cmd("sudo mv /tmp/cc_danted.conf /etc/danted.conf", check=False)
         await self._run_cmd("sudo systemctl enable danted", check=False)
         await self._run_cmd("sudo systemctl restart danted", check=False)
 

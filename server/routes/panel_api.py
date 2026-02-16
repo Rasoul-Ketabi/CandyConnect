@@ -30,10 +30,10 @@ async def login(req: LoginRequest):
 # ── Dashboard ──
 
 @router.get("/dashboard")
-async def get_dashboard(user=Depends(auth.require_admin)):
+async def get_dashboard(limit: int = 10, user=Depends(auth.require_admin)):
     server_info = await get_server_info()
     vpn_cores = await protocol_manager.get_all_cores_info()
-    logs = await db.get_logs(10)
+    logs = await db.get_logs(limit)
     
     active_connections = sum(c.get("active_connections", 0) for c in vpn_cores)
     running_cores = sum(1 for c in vpn_cores if c.get("status") == "running")
@@ -153,24 +153,36 @@ async def get_cores(user=Depends(auth.require_admin)):
 
 @router.post("/cores/{id}/start")
 async def start_core(id: str, user=Depends(auth.require_admin)):
-    success = await protocol_manager.start_protocol(id)
-    if success:
-        return {"success": True, "message": f"{id.upper()} started"}
-    raise HTTPException(status_code=500, detail=f"Failed to start {id}")
+    try:
+        success = await protocol_manager.start_protocol(id)
+        if success:
+            return {"success": True, "message": f"{id.upper()} started"}
+        raise HTTPException(status_code=500, detail=f"Failed to start {id}")
+    except Exception as e:
+        logger.exception(f"Error starting {id}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/cores/{id}/stop")
 async def stop_core(id: str, user=Depends(auth.require_admin)):
-    success = await protocol_manager.stop_protocol(id)
-    if success:
-        return {"success": True, "message": f"{id.upper()} stopped"}
-    raise HTTPException(status_code=500, detail=f"Failed to stop {id}")
+    try:
+        success = await protocol_manager.stop_protocol(id)
+        if success:
+            return {"success": True, "message": f"{id.upper()} stopped"}
+        raise HTTPException(status_code=500, detail=f"Failed to stop {id}")
+    except Exception as e:
+        logger.exception(f"Error stopping {id}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/cores/{id}/restart")
 async def restart_core(id: str, user=Depends(auth.require_admin)):
-    success = await protocol_manager.restart_protocol(id)
-    if success:
-        return {"success": True, "message": f"{id.upper()} restarted"}
-    raise HTTPException(status_code=500, detail=f"Failed to restart {id}")
+    try:
+        success = await protocol_manager.restart_protocol(id)
+        if success:
+            return {"success": True, "message": f"{id.upper()} restarted"}
+        raise HTTPException(status_code=500, detail=f"Failed to restart {id}")
+    except Exception as e:
+        logger.exception(f"Error restarting {id}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ── Core Configs ──
 

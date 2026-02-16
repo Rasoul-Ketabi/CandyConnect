@@ -57,7 +57,17 @@ class ProtocolManager:
                 if started:
                     logger.info(f"Auto-started protocol: {pid}")
                 else:
-                    logger.warning(f"Failed to auto-start protocol: {pid}")
+                    # Fetch last error from DB logs for this protocol
+                    logs = await db.get_logs(20)
+                    reason = "Unknown error"
+                    for entry_str in logs:
+                        import json
+                        entry = json.loads(entry_str)
+                        if entry.get("source") == pid.upper() or entry.get("source") == pid:
+                            if entry.get("level") == "ERROR":
+                                reason = entry.get("message")
+                                break
+                    logger.warning(f"Failed to auto-start protocol: {pid} (Reason: {reason})")
             except Exception as e:
                 logger.error(f"Failed to auto-start protocol {pid}: {e}")
 
