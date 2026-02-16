@@ -165,9 +165,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.prepare.outputs.tag_name }}
-          name: "CandyConnect VPN ${{ needs.prepare.outputs.tag_name }}"
           files: ${{ steps.find_apk.outputs.artifact_path }}
-          draft: false
-          prerelease: false
+          make_latest: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
