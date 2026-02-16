@@ -72,6 +72,8 @@ async def lifespan(app: FastAPI):
     if _db_ready:
         try:
             await add_log("INFO", "System", "CandyConnect server started")
+            # Auto start protocols
+            asyncio.create_task(protocol_manager.auto_start_protocols())
         except Exception:
             pass
     logger.info("CandyConnect server started")

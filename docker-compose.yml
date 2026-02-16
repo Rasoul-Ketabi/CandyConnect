@@ -33,13 +33,13 @@ services:
     ports:
       - "${CC_PANEL_PORT:-8443}:${CC_PANEL_PORT:-8443}"
       # VPN protocol ports (uncomment the ones you need)
-      # - "443:443"       # V2Ray / Xray
-      # - "51820:51820/udp"  # WireGuard
-      # - "1194:1194/udp"    # OpenVPN
-      # - "500:500/udp"      # IKEv2
-      # - "4500:4500/udp"    # IKEv2 NAT-T
-      # - "1701:1701/udp"    # L2TP
-      # - "53:53/udp"        # DNSTT
+      - "443:443" # V2Ray / Xray
+      - "51820:51820/udp" # WireGuard
+      - "1194:1194/udp" # OpenVPN
+      - "500:500/udp" # IKEv2
+      - "4500:4500/udp" # IKEv2 NAT-T
+      - "1701:1701/udp" # L2TP
+      - "53:53/udp" # DNSTT
       # - "8388:8388"        # SlipStream
       # - "9443:9443"        # TrustTunnel
     environment:

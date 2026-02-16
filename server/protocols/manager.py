@@ -43,6 +43,34 @@ class ProtocolManager:
     def get_protocol(self, proto_id: str):
         return self._protocols.get(proto_id)
 
+    async def auto_start_protocols(self) -> None:
+        """Automatically install and start cores, and sync existing clients."""
+        import logging
+        from database import get_all_clients, update_client
+        logger = logging.getLogger("candyconnect")
+        
+        # 1. Start Protocols
+        for pid in ["v2ray", "wireguard", "openvpn", "ikev2", "l2tp", "dnstt"]:
+            try:
+                await self.install_protocol(pid)
+                await self.start_protocol(pid)
+                logger.info(f"Auto-started protocol: {pid}")
+            except Exception as e:
+                logger.error(f"Failed to auto-start protocol {pid}: {e}")
+
+        # 2. Sync Clients to Backends
+        try:
+            clients = await get_all_clients()
+            for client in clients:
+                logger.info(f"Syncing client '{client['username']}' to backends...")
+                pdata = await self.add_client_to_protocols(
+                    client["username"], client, client["protocols"],
+                    existing_data=client.get("protocol_data")
+                )
+                await update_client(client["id"], {"protocol_data": pdata})
+        except Exception as e:
+            logger.error(f"Failed to sync clients to backends: {e}")
+
     async def install_protocol(self, proto_id: str) -> bool:
         proto = self.get_protocol(proto_id)
         if not proto:
@@ -74,8 +102,10 @@ class ProtocolManager:
 
     async def get_all_cores_info(self) -> List[dict]:
         """Collect basic information for all supported protocols.
-        Returns a list of dicts: id, name, status, version, port, active_connections
+        Returns a list of dicts: id, name, status, version, port, active_connections, uptime, total_traffic
         """
+        import time
+        from database import get_total_protocol_traffic
         infos: List[dict] = []
         for pid in SUPPORTED_PROTOCOLS:
             proto = self.get_protocol(pid)
@@ -92,10 +122,11 @@ class ProtocolManager:
                 await set_core_status(pid, {
                     "status": new_status,
                     "pid": status.get("pid"),
-                    "started_at": status.get("started_at") if running else None,
+                    "started_at": int(time.time()) if running else None,
                     "version": status.get("version", ""),
                 })
                 status["status"] = new_status
+                if running: status["started_at"] = int(time.time())
 
             try:
                 version = status.get("version") or await proto.get_version()
@@ -108,6 +139,14 @@ class ProtocolManager:
                 active = 0
 
             port = await self._get_protocol_port(pid)
+            
+            # Calculate uptime
+            uptime = 0
+            if running and status.get("started_at"):
+                uptime = int(time.time()) - int(status["started_at"])
+            
+            # Get total traffic
+            traffic = await get_total_protocol_traffic(pid)
 
             infos.append({
                 "id": pid,
@@ -116,6 +155,8 @@ class ProtocolManager:
                 "version": version,
                 "port": port,
                 "active_connections": active,
+                "uptime": uptime,
+                "total_traffic": traffic,
             })
         return infos
 

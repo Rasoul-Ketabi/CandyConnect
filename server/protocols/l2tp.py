@@ -36,7 +36,12 @@ class L2TPProtocol(BaseProtocol):
                 return False
             await self._write_config(config)
             await self._run_cmd("sudo systemctl enable xl2tpd && sudo systemctl start xl2tpd", check=False)
-            running = await self._is_service_active("xl2tpd")
+            
+            # Check if running, if not try direct call
+            if not await self._is_service_active("xl2tpd"):
+                await self._start_process("xl2tpd -D")
+                
+            running = await self._is_service_active("xl2tpd") or await self.is_running()
             if running:
                 version = await self.get_version()
                 await set_core_status(self.PROTOCOL_ID, {

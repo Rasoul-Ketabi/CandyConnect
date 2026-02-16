@@ -85,14 +85,14 @@ class OpenVPNProtocol(BaseProtocol):
                 check=False,
             )
             if rc != 0:
-                # Try alternative service name
-                await self._run_cmd(
-                    "sudo systemctl enable openvpn@server && sudo systemctl start openvpn@server",
-                    check=False,
+                # Try direct call (docker-friendly)
+                await self._start_process(
+                    f"openvpn --config {os.path.join(self.OVPN_DIR, 'server.conf')}"
                 )
 
             running = await self._is_service_active("openvpn-server@server") or \
-                      await self._is_service_active("openvpn@server")
+                      await self._is_service_active("openvpn@server") or \
+                      await self.is_running()
 
             if running:
                 version = await self.get_version()

@@ -1,8 +1,3 @@
-# ═══════════════════════════════════════════════════════════
-#  CandyConnect - Multi-stage Docker Build
-#  Works on Linux, Windows (Docker Desktop), and macOS
-# ═══════════════════════════════════════════════════════════
-
 # ── Stage 1: Build the Web Panel ──
 FROM node:20-slim AS panel-builder
 
@@ -17,6 +12,7 @@ RUN npm install --legacy-peer-deps
 COPY web-panel/ ./
 
 # Build the panel (tsc + vite)
+ARG CACHE_BUST=1
 RUN npm run build
 
 
@@ -36,9 +32,30 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         iproute2 \
         procps \
         sudo \
+        openssh-server \
         openssh-client \
         redis-tools \
+        wireguard-tools \
+        openvpn \
+        strongswan \
+        strongswan-pki \
+        libcharon-extra-plugins \
+        xl2tpd \
+        dante-server \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Xray
+RUN bash -c 'curl -sL https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh | bash -s -- install' && \
+    ln -sf /usr/local/bin/xray /usr/bin/xray
+
+# Install DNSTT (Download official binary like dnstt-deploy.sh)
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then DNSTT_ARCH="amd64"; \
+    elif [ "$ARCH" = "aarch64" ]; then DNSTT_ARCH="arm64"; \
+    elif [ "$ARCH" = "armv7l" ]; then DNSTT_ARCH="arm"; \
+    else DNSTT_ARCH="386"; fi && \
+    curl -L -o /usr/local/bin/dnstt-server https://dnstt.network/dnstt-server-linux-${DNSTT_ARCH} && \
+    chmod +x /usr/local/bin/dnstt-server
 
 # Set up app directory structure (mirrors install.sh layout)
 ENV CC_DATA_DIR=/opt/candyconnect

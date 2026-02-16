@@ -109,8 +109,8 @@ const DashboardPage: React.FC = () => {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
           {[
-            { label: 'CPU', sub: `${s.cpu.model.split(' ').slice(0,3).join(' ')} · ${s.cpu.cores} Cores`, pct: cpuPct, icon: <Cpu className="w-4 h-4" strokeWidth={2} /> },
-            { label: 'Memory', sub: `${(s.ram.used/1024).toFixed(1)} / ${(s.ram.total/1024).toFixed(1)} GB`, pct: ramPct, icon: <Activity className="w-4 h-4" strokeWidth={2} /> },
+            { label: 'CPU', sub: `${s.cpu.model.split(' ').slice(0, 3).join(' ')} · ${s.cpu.cores} Cores`, pct: cpuPct, icon: <Cpu className="w-4 h-4" strokeWidth={2} /> },
+            { label: 'Memory', sub: `${(s.ram.used / 1024).toFixed(1)} / ${(s.ram.total / 1024).toFixed(1)} GB`, pct: ramPct, icon: <Activity className="w-4 h-4" strokeWidth={2} /> },
             { label: 'Disk', sub: `${s.disk.used} / ${s.disk.total} GB`, pct: diskPct, icon: <Server className="w-4 h-4" strokeWidth={2} /> },
           ].map((r, i) => (
             <div key={i} className="bg-slate-50 dark:bg-slate-700/30 rounded-xl p-4">
@@ -195,7 +195,7 @@ const DashboardPage: React.FC = () => {
                 </div>
                 <div className="bg-white dark:bg-slate-600/30 rounded-lg px-2.5 py-1.5">
                   <span className="text-slate-400 dark:text-slate-500 block text-[10px]">Traffic Out</span>
-                  <span className="font-semibold text-slate-700 dark:text-slate-300">{formatTraffic(core.total_traffic.out)}</span>
+                  <span className="font-semibold text-slate-700 dark:text-slate-300">{formatTraffic(core.total_traffic?.out || 0)}</span>
                 </div>
               </div>
               <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-2 font-mono">v{core.version}</p>
@@ -232,7 +232,7 @@ const DashboardPage: React.FC = () => {
 const LayoutDashboardIcon = () => (
   <div className="w-8 h-8 rounded-lg bg-orange-50 dark:bg-orange-900/20 flex items-center justify-center">
     <svg className="w-4.5 h-4.5 text-orange-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>
+      <rect width="7" height="9" x="3" y="3" rx="1" /><rect width="7" height="5" x="14" y="3" rx="1" /><rect width="7" height="9" x="14" y="12" rx="1" /><rect width="7" height="5" x="3" y="16" rx="1" />
     </svg>
   </div>
 );

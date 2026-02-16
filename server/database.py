@@ -2,9 +2,9 @@
 CandyConnect Server - Redis Database Layer
 All data is stored in Redis with JSON serialization.
 """
-import json, time, uuid, hashlib
+import json, time, uuid, hashlib, logging
 from typing import Optional
-from passlib.hash import bcrypt
+import bcrypt
 import redis.asyncio as redis
 
 from config import (
@@ -68,12 +68,19 @@ async def init_db():
     r = await get_redis()
     await r.ping()  # Will raise if Redis is unreachable
 
-    # Admin
-    if not await r.exists(K_ADMIN):
-        await r.hset(K_ADMIN, mapping={
-            "username": DEFAULT_ADMIN_USER,
-            "password_hash": bcrypt.hash(DEFAULT_ADMIN_PASS),
-        })
+    # Always sync admin credentials from env vars if they exist
+    # This allows resetting the password via .env and restart
+    admin_user = DEFAULT_ADMIN_USER
+    admin_pass = DEFAULT_ADMIN_PASS
+    
+    # We use direct bcrypt to avoid passlib issues in docker
+    password_hash = bcrypt.hashpw(admin_pass.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    
+    await r.hset(K_ADMIN, mapping={
+        "username": admin_user,
+        "password_hash": password_hash,
+    })
+    logging.getLogger("candyconnect").info(f"Admin credentials synced: {admin_user}")
 
     # Panel config
     if not await r.exists(K_PANEL):
@@ -97,14 +104,30 @@ async def init_db():
     # Default core statuses
     for proto in ["v2ray", "wireguard", "openvpn", "ikev2", "l2tp", "dnstt", "slipstream", "trusttunnel"]:
         if not await r.hexists(K_CORE_STATUS, proto):
+            # All protocols except slipstream and trusttunnel are running by default
+            status = "running" if proto not in ["slipstream", "trusttunnel"] else "stopped"
             await r.hset(K_CORE_STATUS, proto, json.dumps({
-                "status": "stopped",
+                "status": status,
                 "pid": None,
-                "started_at": None,
+                "started_at": int(time.time()) if status == "running" else None,
                 "version": "",
             }))
 
     await r.set(K_LAST_SYNC, str(int(time.time())))
+
+    # Create default 'admin' client if it doesn't exist
+    if not await r.hexists(K_CLIENT_IDX, admin_user):
+        admin_client_data = {
+            "username": admin_user,
+            "password": admin_pass,
+            "comment": "Default administrator client",
+            "enabled": True,
+            "protocols": {p: (p not in ["slipstream", "trusttunnel"]) for p in [
+                "v2ray", "wireguard", "openvpn", "ikev2", "l2tp", "dnstt", "slipstream", "trusttunnel"
+            ]}
+        }
+        await create_client(admin_client_data)
+        logging.getLogger("candyconnect").info(f"Default client '{admin_user}' created")
 
 
 def _default_core_configs() -> dict:
@@ -116,6 +139,7 @@ def _default_core_configs() -> dict:
             "ssl_key_path": "/etc/ssl/private/candyconnect.key",
             "max_clients": 500,
             "log_level": "info",
+            "mode": "normal",
             "auto_backup": True,
             "backup_interval": 24,
             "api_enabled": True,
@@ -136,15 +160,30 @@ def _default_core_configs() -> dict:
             "config_json": json.dumps({
                 "log": {"loglevel": "warning"},
                 "inbounds": [
-                    {"tag": "vless-ws", "port": 443, "protocol": "vless",
-                     "settings": {"clients": [], "decryption": "none"},
-                     "streamSettings": {"network": "ws", "wsSettings": {"path": "/vless"}}},
+                    {
+                        "tag": "vless-tcp-xtls", "port": 443, "protocol": "vless",
+                        "settings": {"clients": [], "decryption": "none"},
+                        "streamSettings": {
+                            "network": "tcp",
+                            "security": "none",
+                            "tcpSettings": {"header": {"type": "none"}}
+                        }
+                    },
+                    {
+                        "tag": "vmess-ws", "port": 8080, "protocol": "vmess",
+                        "settings": {"clients": []},
+                        "streamSettings": {
+                            "network": "ws",
+                            "wsSettings": {"path": "/vmess"}
+                        }
+                    }
                 ],
                 "outbounds": [
                     {"tag": "direct", "protocol": "freedom"},
                     {"tag": "blocked", "protocol": "blackhole"},
                 ],
                 "routing": {
+                    "domainStrategy": "AsIs",
                     "rules": [{"type": "field", "outboundTag": "blocked", "ip": ["geoip:private"]}]
                 }
             }, indent=2),
@@ -171,10 +210,11 @@ def _default_core_configs() -> dict:
             "dns": "1.1.1.1", "mtu": 1400, "mru": 1400,
         },
         "dnstt": {
-            "listen_port": 53, "domain": "dns.candyconnect.io",
-            "upstream_dns": "8.8.8.8",
+            "listen_port": 5300,
+            "domain": "dns.candyconnect.io",
             "public_key": "",
-            "ttl": 60, "max_payload": 200,
+            "tunnel_mode": "ssh", # 'ssh' or 'socks'
+            "mtu": 1232,
         },
         "slipstream": {
             "port": 8388, "method": "aes-256-cfb",
@@ -199,7 +239,18 @@ async def verify_admin(username: str, password: str) -> bool:
     data = await r.hgetall(K_ADMIN)
     if not data:
         return False
-    return data.get("username") == username and bcrypt.verify(password, data.get("password_hash", ""))
+    
+    stored_hash = data.get("password_hash", "")
+    if not stored_hash:
+        return False
+        
+    try:
+        return data.get("username") == username and bcrypt.checkpw(
+            password.encode('utf-8'), 
+            stored_hash.encode('utf-8')
+        )
+    except Exception:
+        return False
 
 
 async def get_admin_username() -> str:
@@ -210,9 +261,16 @@ async def get_admin_username() -> str:
 async def change_admin_password(current: str, new_pass: str) -> bool:
     r = await get_redis()
     data = await r.hgetall(K_ADMIN)
-    if not bcrypt.verify(current, data.get("password_hash", "")):
+    stored_hash = data.get("password_hash", "")
+    
+    try:
+        if not bcrypt.checkpw(current.encode('utf-8'), stored_hash.encode('utf-8')):
+            return False
+    except Exception:
         return False
-    await r.hset(K_ADMIN, "password_hash", bcrypt.hash(new_pass))
+        
+    new_hash = bcrypt.hashpw(new_pass.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    await r.hset(K_ADMIN, "password_hash", new_hash)
     return True
 
 
@@ -523,3 +581,19 @@ async def get_logs(limit: int = 100) -> list[dict]:
 async def get_client_count() -> int:
     r = await get_redis()
     return await r.hlen(K_CLIENTS)
+
+
+async def get_total_protocol_traffic(protocol: str) -> dict:
+    """Sum traffic for all clients on a protocol. Return {in: 0, out: total_bytes}."""
+    r = await get_redis()
+    total = 0.0
+    # Scan K_TRAFFIC hash for keys ending with :protocol
+    # Note: For large datasets, a more optimized approach would be needed
+    all_traffic = await r.hgetall(K_TRAFFIC)
+    for key, val in all_traffic.items():
+        if key.endswith(f":{protocol}"):
+            try:
+                total += float(val)
+            except ValueError:
+                pass
+    return {"in": 0, "out": int(total)}

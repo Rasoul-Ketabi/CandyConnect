@@ -100,7 +100,7 @@ const ClientsPage: React.FC = () => {
           enabled: fEnabled, group: fGroup.trim() || undefined,
           traffic_limit: { value: fTrafficVal, unit: fTrafficUnit },
           time_limit: { mode: fTimeMode, value: fTimeVal, on_hold: fOnHold },
-          protocols: fProtocols as ClientProtocols,
+          protocols: fProtocols as unknown as ClientProtocols,
         });
         notify(`Client "${fUsername}" created`, 'success');
       } else if (editClient) {
@@ -109,7 +109,7 @@ const ClientsPage: React.FC = () => {
           group: fGroup.trim() || undefined,
           traffic_limit: { value: fTrafficVal, unit: fTrafficUnit },
           time_limit: { mode: fTimeMode, value: fTimeVal, on_hold: fOnHold },
-          protocols: fProtocols as ClientProtocols,
+          protocols: fProtocols as unknown as ClientProtocols,
         });
         notify(`Client "${fUsername}" updated`, 'success');
       }

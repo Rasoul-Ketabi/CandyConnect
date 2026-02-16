@@ -20,7 +20,7 @@ class IKEv2Protocol(BaseProtocol):
             await add_log("INFO", self.PROTOCOL_NAME, "Installing strongSwan (IKEv2)...")
 
             rc, _, err = await self._run_cmd(
-                "sudo apt update && sudo apt install strongswan strongswan-pki libcharon-extra-plugins libstrongswan-extra-plugins -y",
+                "sudo apt update && sudo apt install strongswan strongswan-pki libcharon-extra-plugins -y",
                 check=False,
             )
             if rc != 0:
@@ -87,11 +87,11 @@ class IKEv2Protocol(BaseProtocol):
             rc, _, err = await self._run_cmd("sudo systemctl start strongswan-starter", check=False)
 
             if rc != 0:
-                # Try alternative
-                await self._run_cmd("sudo systemctl enable ipsec && sudo systemctl start ipsec", check=False)
+                # Try direct call (docker-friendly)
+                await self._run_cmd("sudo ipsec restart", check=False)
 
             running = await self._is_service_active("strongswan-starter") or \
-                      await self._is_service_active("ipsec")
+                      await self.is_running()
 
             if running:
                 version = await self.get_version()
