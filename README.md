@@ -63,12 +63,14 @@ CandyConnect is an all-in-one VPN server management system that supports multipl
 - **Access:** Root privileges
 - **Ports:** 8443 (panel), plus VPN protocol ports
 
-### One-Line Install
+### Management Menu (Recommended)
+
+Run the interactive menu to install, uninstall, or check the status:
 
 ```bash
 git clone https://github.com/AmiRCandy/CandyConnect.git
 cd CandyConnect
-sudo bash install.sh
+sudo bash menu.sh
 ```
 
 The installer will:
