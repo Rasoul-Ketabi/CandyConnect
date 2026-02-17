@@ -97,6 +97,8 @@ export interface Settings {
   directCountryAccess?: boolean;
   customBlockDomains?: string[];
   customDirectDomains?: string[];
+  primaryDns?: string;
+  secondaryDns?: string;
   v2rayCore?: string;
   wireguardCore?: string;
   autoStart?: boolean;
@@ -681,6 +683,16 @@ export const CheckSystemExecutables = async (): Promise<string[]> => {
   }
 };
 
+export const GenerateSingBoxConfig = async (serverAddress: string): Promise<string> => {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return await invoke<string>('generate_sing_box_config', { serverAddress });
+  } catch (e) {
+    console.error('Failed to generate sing-box config:', e);
+    return '';
+  }
+};
+
 export const IsAdmin = async (): Promise<boolean> => {
   try {
     const { invoke } = await import('@tauri-apps/api/core');
@@ -707,5 +719,5 @@ export default {
   PingProfile, PingAllProfiles, PingAllConfigs, PingProtocol, PingConfig,
   LoadSettings, SaveSettings, GetNetworkSpeed,
   LoadLogs, ClearLogs, ValidateProxyLink, CheckSystemExecutables, LoadSavedCredentials,
-  IsAdmin, RestartAsAdmin,
+  IsAdmin, RestartAsAdmin, GenerateSingBoxConfig,
 };

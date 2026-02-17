@@ -68,6 +68,12 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
     handleSaveSettings(updatedSettings);
   };
 
+  const handleTextChange = (key: keyof Settings, value: string) => {
+    if (!settings) return;
+    const updatedSettings = { ...settings, [key]: value };
+    handleSaveSettings(updatedSettings);
+  };
+
   const ToggleRow: React.FC<{
     icon: React.ReactNode;
     title: string;
@@ -180,31 +186,31 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
         <AutoUpdateToggle />
       </div>
 
-      {/* Cores */}
+      {/* DNS Settings */}
       <div className="space-y-3">
-        <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('cores')}</h3>
-        <CoreSelector
-          coreType="v2ray"
-          icon={<CpuIcon className="w-6 h-6" />}
-          title={t('v2rayCore')}
-          options={[
-            { value: 'sing-box', label: t('singBox') },
-            { value: 'xray', label: t('xray') },
-          ]}
-          selectedValue={settings?.v2rayCore || 'sing-box'}
-          onSelectionChange={(value) => handleCoreChange('v2ray', value)}
-        />
-        <CoreSelector
-          coreType="wireguard"
-          icon={<NetworkIcon className="w-6 h-6" />}
-          title={t('wireGuard')}
-          options={[
-            { value: 'amnezia', label: t('amnezia') },
-            { value: 'native', label: t('nativeWireGuard') },
-          ]}
-          selectedValue={settings?.wireguardCore || 'amnezia'}
-          onSelectionChange={(value) => handleCoreChange('wireguard', value)}
-        />
+        <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">DNS Settings</h3>
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-4 shadow-sm border border-slate-200/50 dark:border-slate-700/50 space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase ml-1">Primary DNS</label>
+            <input
+              type="text"
+              value={settings?.primaryDns || ''}
+              onChange={(e) => handleTextChange('primaryDns', e.target.value)}
+              placeholder="8.8.8.8"
+              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500/50 transition-all"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase ml-1">Secondary DNS</label>
+            <input
+              type="text"
+              value={settings?.secondaryDns || ''}
+              onChange={(e) => handleTextChange('secondaryDns', e.target.value)}
+              placeholder="1.1.1.1"
+              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500/50 transition-all"
+            />
+          </div>
+        </div>
       </div>
 
       {/* Debug Section */}

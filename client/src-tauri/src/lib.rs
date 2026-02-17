@@ -5,6 +5,160 @@ use tauri::{
     Manager,
 };
 
+const SING_BOX_TUN_JSON: &str = r#"{
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "dns": {
+    "servers": [
+      {
+        "tag": "dns-remote",
+        "address": "{{primary_dns}}",
+        "address_resolver": "dns-local",
+        "strategy": "prefer_ipv4",
+        "detour": "socks-out"
+      },
+      {
+        "tag": "dns-local",
+        "address": "{{secondary_dns}}",
+        "detour": "direct-out"
+      },
+      {
+        "tag": "dns-block",
+        "address": "rcode://success"
+      }
+    ],
+    "final": "dns-remote",
+    "strategy": "prefer_ipv4",
+    "disable_cache": false,
+    "disable_expire": false
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "interface_name": "CandyConnect",
+      "inet4_address": "{{inet4_address}}",
+      "inet6_address": "{{inet6_address}}",
+      "mtu": {{mtu}},
+      "auto_route": true,
+      "strict_route": false,
+      "sniff": true,
+      "sniff_override_destination": false,
+      "stack": "gvisor",
+      "endpoint_independent_nat": true,
+      "platform": {
+        "http_proxy": {
+          "enabled": true,
+          "server": "127.0.0.1",
+          "server_port": 2080
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "socks",
+      "tag": "socks-out",
+      "server": "{{proxy_host}}",
+      "server_port": {{proxy_port}}
+    },
+    {
+      "type": "direct",
+      "tag": "direct-out"
+    },
+    {
+      "type": "dns",
+      "tag": "dns-out"
+    },
+    {
+      "type": "block",
+      "tag": "block-out"
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "protocol": "dns",
+        "outbound": "dns-out"
+      },
+      {
+        "ip_cidr": [
+          "{{server_ip}}/32"
+        ],
+        "outbound": "direct-out"
+      },
+      {
+        "domain": [
+          "{{server_domain}}",
+          "gm.litelag.ir"
+        ],
+        "outbound": "direct-out"
+      },
+      {{custom_rules}}
+    ],
+    "final": "socks-out",
+    "auto_detect_interface": true
+  }
+}"#;
+
+#[tauri::command]
+async fn generate_sing_box_config(app: tauri::AppHandle, server_address: String) -> Result<String, String> {
+    let app_data_dir = app.path().app_data_dir().expect("Failed to get app data directory");
+    let settings_path = app_data_dir.join("settings.json");
+    
+    if !settings_path.exists() {
+        return Err("Settings file not found".to_string());
+    }
+
+    let settings_content = fs::read_to_string(settings_path).map_err(|e| e.to_string())?;
+    let settings: serde_json::Value = serde_json::from_str(&settings_content).map_err(|e| e.to_string())?;
+
+    let mut config = SING_BOX_TUN_JSON.to_string();
+    
+    // Determine if server_address is IP or domain for routing
+    let mut server_ip = "127.0.0.1".to_string();
+    let mut server_domain = "localhost".to_string();
+    
+    if server_address.parse::<std::net::IpAddr>().is_ok() {
+        server_ip = server_address.clone();
+    } else {
+        server_domain = server_address.clone();
+        // We'd ideally resolve IP here too, but for routing, domain might suffice if sing-box handles it
+    }
+
+    // Handle Custom Rules
+    let mut custom_rules = Vec::new();
+    if let Some(direct_domains) = settings["customDirectDomains"].as_array() {
+        if !direct_domains.is_empty() {
+             let domains: Vec<String> = direct_domains.iter().filter_map(|v| v.as_str().map(|s| format!("\"{}\"", s))).collect();
+             custom_rules.push(format!("{{ \"domain\": [{}], \"outbound\": \"direct-out\" }}", domains.join(",")));
+        }
+    }
+    if let Some(block_domains) = settings["customBlockDomains"].as_array() {
+        if !block_domains.is_empty() {
+             let domains: Vec<String> = block_domains.iter().filter_map(|v| v.as_str().map(|s| format!("\"{}\"", s))).collect();
+             custom_rules.push(format!("{{ \"domain\": [{}], \"outbound\": \"block-out\" }}", domains.join(",")));
+        }
+    }
+    let custom_rules_str = if custom_rules.is_empty() { "".to_string() } else { format!("{},", custom_rules.join(",")) };
+
+    // Replace placeholders
+    config = config.replace("{{primary_dns}}", settings["primaryDns"].as_str().unwrap_or("8.8.8.8"));
+    config = config.replace("{{secondary_dns}}", settings["secondaryDns"].as_str().unwrap_or("1.1.1.1"));
+    config = config.replace("{{inet4_address}}", settings["tunInet4CIDR"].as_str().unwrap_or("172.19.0.1/30"));
+    config = config.replace("{{inet6_address}}", settings["tunInet6CIDR"].as_str().unwrap_or("fdfe:dcba:9876::1/126"));
+    config = config.replace("{{mtu}}", &settings["mtu"].as_u64().unwrap_or(9000).to_string());
+    config = config.replace("{{proxy_host}}", settings["proxyHost"].as_str().unwrap_or("127.0.0.1"));
+    config = config.replace("{{proxy_port}}", &settings["proxyPort"].as_u64().unwrap_or(10808).to_string());
+    config = config.replace("{{server_ip}}", &server_ip);
+    config = config.replace("{{server_domain}}", &server_domain);
+    config = config.replace("{{custom_rules}}", &custom_rules_str);
+
+    Ok(config)
+}
+
 fn init_app_files(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let app_data_dir = app
         .path()
@@ -27,7 +181,7 @@ fn init_app_files(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             "theme": "light",
             "language": "en",
             "proxyHost": "127.0.0.1",
-            "proxyPort": 1080,
+            "proxyPort": 10808,
             "adBlocking": true,
             "malwareProtection": true,
             "phishingPrevention": false,
@@ -40,7 +194,14 @@ fn init_app_files(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             "autoReconnect": true,
             "killSwitch": false,
             "dnsLeakProtection": true,
-            "splitTunneling": false
+            "splitTunneling": false,
+            "tunInet4CIDR": "172.19.0.1/30",
+            "tunInet6CIDR": "fdfe:dcba:9876::1/126",
+            "mtu": 9000,
+            "primaryDns": "8.8.8.8",
+            "secondaryDns": "1.1.1.1",
+            "customDirectDomains": [],
+            "customBlockDomains": []
         });
         fs::write(&settings_path, serde_json::to_string_pretty(&default_settings)?)?;
         log::info!("Created default settings.json");
@@ -172,22 +333,13 @@ async fn restart_as_admin(app: tauri::AppHandle) -> Result<(), String> {
     
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::ffi::OsStrExt;
-        use std::ptr;
-        
-        let path: Vec<u16> = current_exe.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
-        let operation: Vec<u16> = std::ffi::OsStr::new("runas").encode_wide().chain(std::iter::once(0)).collect();
-        
-        unsafe {
-            windows_sys::Win32::UI::Shell::ShellExecuteW(
-                0,
-                operation.as_ptr(),
-                path.as_ptr(),
-                ptr::null(),
-                ptr::null(),
-                1, // SW_SHOWNORMAL
-            );
-        }
+        use std::process::Command;
+        // Use PowerShell to start the process with 'runas' verb (triggers UAC)
+        let _ = Command::new("powershell")
+            .arg("-Command")
+            .arg(format!("Start-Process '{}' -Verb RunAs", current_exe.display()))
+            .spawn();
+            
         app.exit(0);
         Ok(())
     }
@@ -259,7 +411,7 @@ pub fn run() {
 
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![measure_latency, check_system_executables, is_admin, restart_as_admin])
+    .invoke_handler(tauri::generate_handler![measure_latency, check_system_executables, is_admin, restart_as_admin, generate_sing_box_config])
     .build(tauri::generate_context!())
     .expect("error while building tauri application")
     .run(|app_handle, event| match event {
