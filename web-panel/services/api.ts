@@ -78,6 +78,8 @@ export interface DashboardData {
   logs: LogEntry[];
   stats: {
     total_clients: number;
+    online_clients: number;
+    total_traffic: number;
     active_connections: number;
     running_cores: number;
     total_cores: number;
@@ -103,6 +105,7 @@ export interface ConnectionHistoryEntry {
 
 export interface Client {
   id: string; username: string; password: string; comment: string; enabled: boolean;
+  is_online: boolean;
   group?: string;
   traffic_limit: { value: number; unit: string };
   traffic_used: number;

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { getDashboard, type DashboardData } from '../services/api';
 import { formatUptime, formatTraffic } from '../utils/format';
 import ProgressBar from '../components/ProgressBar';
-import { Users, Link2, Cpu, Clock, Monitor, Zap, Shield, Lock, KeyRound, Radio, Globe, Wind, Castle, ArrowDownCircle, ArrowUpCircle, Activity, Server, Loader2, ExternalLink } from 'lucide-react';
+import { Users, Link2, Cpu, Clock, Monitor, Zap, Shield, Lock, KeyRound, Radio, Globe, Wind, Castle, ArrowDownCircle, ArrowUpCircle, Activity, Server, Loader2, ExternalLink, ArrowDownUp } from 'lucide-react';
 
 const coreIcons: Record<string, React.ReactNode> = {
   v2ray: <Zap className="w-4.5 h-4.5 text-yellow-500" strokeWidth={2} />,
@@ -85,10 +85,10 @@ const DashboardPage: React.FC = () => {
       {/* Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { icon: <Users className="w-5 h-5" strokeWidth={1.8} />, value: totalClients, label: 'Total Clients', color: 'text-blue-500', bg: 'bg-blue-50 dark:bg-blue-900/20' },
+          { icon: <Users className="w-5 h-5" strokeWidth={1.8} />, value: `${data.stats.online_clients}/${data.stats.total_clients}`, label: 'Clients Online', color: 'text-blue-500', bg: 'bg-blue-50 dark:bg-blue-900/20' },
+          { icon: <ArrowDownUp className="w-5 h-5" strokeWidth={1.8} />, value: formatTraffic(data.stats.total_traffic), label: 'Traffic Used', color: 'text-cyan-500', bg: 'bg-cyan-50 dark:bg-cyan-900/20' },
           { icon: <Link2 className="w-5 h-5" strokeWidth={1.8} />, value: totalConnections, label: 'Active Connections', color: 'text-green-500', bg: 'bg-green-50 dark:bg-green-900/20' },
           { icon: <Cpu className="w-5 h-5" strokeWidth={1.8} />, value: `${runningCores}/${data.stats.total_cores}`, label: 'Cores Online', color: 'text-orange-500', bg: 'bg-orange-50 dark:bg-orange-900/20' },
-          { icon: <Clock className="w-5 h-5" strokeWidth={1.8} />, value: formatUptime(s.uptime), label: 'Server Uptime', color: 'text-purple-500', bg: 'bg-purple-50 dark:bg-purple-900/20' },
         ].map((st, i) => (
           <div key={i} className="bg-white dark:bg-slate-800 rounded-xl p-4 shadow-sm border border-slate-200/50 dark:border-slate-700/50">
             <div className={`w-9 h-9 rounded-lg ${st.bg} flex items-center justify-center mb-3`}>

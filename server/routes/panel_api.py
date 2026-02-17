@@ -49,6 +49,9 @@ async def get_dashboard(limit: int = 10, user=Depends(auth.require_admin)):
     active_connections = sum(c.get("active_connections", 0) for c in vpn_cores)
     running_cores = sum(1 for c in vpn_cores if c.get("status") == "running")
     
+    clients = await db.get_all_clients()
+    online_count = sum(1 for c in clients if c.get("is_online"))
+
     return {
         "success": True,
         "message": "Dashboard data fetched",
@@ -57,7 +60,9 @@ async def get_dashboard(limit: int = 10, user=Depends(auth.require_admin)):
             "vpn_cores": vpn_cores,
             "logs": logs,
             "stats": {
-                "total_clients": await db.get_client_count(),
+                "total_clients": len(clients),
+                "online_clients": online_count,
+                "total_traffic": await db.get_total_traffic(),
                 "active_connections": active_connections,
                 "running_cores": running_cores,
                 "total_cores": len(vpn_cores),

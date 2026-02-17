@@ -369,6 +369,7 @@ async def create_client(data: dict) -> dict:
         "protocol_data": data.get("protocol_data", {}),
         "last_connected_ip": None,
         "last_connected_time": None,
+        "is_online": False,
         "connection_history": [],
     }
     await r.hset(K_CLIENTS, cid, json.dumps(client))
@@ -441,7 +442,14 @@ async def add_connection_history(client_id: str, protocol: str, event: str, ip: 
     if event == "connect":
         client["last_connected_ip"] = ip
         client["last_connected_time"] = now
-        
+        client["is_online"] = True
+    elif event == "disconnect":
+        client["is_online"] = False
+    
+    # Also handle heartbeats or just direct status
+    if event == "heartbeat":
+        client["is_online"] = True
+        client["last_connected_time"] = now
     history = client.get("connection_history", [])
     history.insert(0, {
         "ip": ip,
@@ -479,7 +487,7 @@ async def _get_client_protocol_traffic(r, client_id: str) -> dict:
     result = {}
     # Use hscan_iter to find all keys for this client efficiently
     async for key, val in r.hscan_iter(K_TRAFFIC, match=f"{client_id}:*"):
-        proto = key.decode().split(":", 1)[1]
+        proto = key.split(":", 1)[1]
         result[proto] = float(val)
     return result
 
@@ -639,6 +647,18 @@ async def delete_tunnel(tunnel_id: str) -> bool:
 async def get_client_count() -> int:
     r = await get_redis()
     return await r.hlen(K_CLIENTS)
+
+
+async def get_total_traffic() -> float:
+    """Sum total traffic across all clients in GB."""
+    r = await get_redis()
+    total_bytes = 0.0
+    async for _, val in r.hscan_iter(K_TRAFFIC):
+        try:
+            total_bytes += float(val)
+        except:
+            pass
+    return total_bytes / (1024 ** 3)
 
 
 async def get_total_protocol_traffic(protocol: str) -> dict:

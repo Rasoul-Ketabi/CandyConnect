@@ -4,7 +4,7 @@ import { formatClientTraffic, getTrafficPercent, protocolName, protocolIcon } fr
 import ProgressBar from '../components/ProgressBar';
 import Modal from '../components/Modal';
 import { useNotify } from '../components/Notification';
-import { Users, Search, ClipboardList, Pencil, Trash2, CheckCircle2, XCircle, Plus, AlertTriangle, PauseCircle, Clock, ArrowDownUp, Loader2 } from 'lucide-react';
+import { Users, Search, ClipboardList, Pencil, Trash2, CheckCircle2, XCircle, Plus, AlertTriangle, PauseCircle, Clock, ArrowDownUp, Loader2, Activity } from 'lucide-react';
 
 const ALL_PROTOCOLS = ['v2ray', 'wireguard', 'openvpn', 'ikev2', 'l2tp', 'dnstt', 'slipstream', 'trusttunnel'] as const;
 
@@ -172,7 +172,7 @@ const ClientsPage: React.FC = () => {
             <div key={client.id} className={`bg-white dark:bg-slate-800 rounded-xl p-3 shadow-sm border border-slate-200/50 dark:border-slate-700/50 flex flex-col justify-between aspect-square group relative ${!client.enabled ? 'opacity-60 grayscale' : ''}`}>
               <div>
                 <div className="flex justify-between items-start mb-2">
-                  <div className={`w-2 h-2 rounded-full ${client.enabled ? 'bg-green-500' : 'bg-red-500'}`} title={client.enabled ? 'Active' : 'Disabled'} />
+                  <div className={`w-2.5 h-2.5 rounded-full ${client.is_online ? 'bg-green-500 shadow-sm shadow-green-500/50 animate-pulse' : !client.enabled ? 'bg-red-500' : 'bg-slate-300 dark:bg-slate-600'}`} title={client.is_online ? 'Online' : !client.enabled ? 'Disabled' : 'Offline'} />
                   {client.time_limit.on_hold && <PauseCircle className="w-3 h-3 text-amber-500" />}
                 </div>
                 <h3 className="font-bold text-slate-800 dark:text-slate-200 text-sm truncate" title={client.username}>{client.username}</h3>
@@ -211,7 +211,7 @@ const ClientsPage: React.FC = () => {
           <div className="space-y-4 text-sm">
             {[
               ['Username', detailClient.username], ['Password', detailClient.password],
-              ['Status', detailClient.enabled ? <span className="flex items-center gap-1.5 align-middle text-green-600 dark:text-green-400 font-bold"><CheckCircle2 className="w-3.5 h-3.5" /> Active</span> : <span className="flex items-center gap-1.5 align-middle text-red-500 font-bold"><XCircle className="w-3.5 h-3.5" /> Disabled</span>],
+              ['Status', detailClient.is_online ? <span className="flex items-center gap-1.5 align-middle text-green-600 dark:text-green-400 font-bold"><Activity className="w-3.5 h-3.5" /> Online</span> : !detailClient.enabled ? <span className="flex items-center gap-1.5 align-middle text-red-500 font-bold"><XCircle className="w-3.5 h-3.5" /> Disabled</span> : <span className="flex items-center gap-1.5 align-middle text-slate-500 font-bold"><PauseCircle className="w-3.5 h-3.5" /> Offline</span>],
               ['Group', detailClient.group || 'None'],
               ['Comment', detailClient.comment || '-'],
               ['Traffic', fmtTraffic(detailClient)],
