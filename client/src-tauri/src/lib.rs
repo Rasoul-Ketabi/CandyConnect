@@ -107,6 +107,36 @@ async fn measure_latency(host: String) -> Result<u64, String> {
     }
 }
 
+#[tauri::command]
+async fn check_system_executables(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let mut missing = Vec::new();
+    let app_dir = app.path().resource_dir().unwrap_or_else(|_| std::env::current_dir().unwrap());
+    
+    // Check extra-tools subdirectories/files based on workflow structure
+    let tools = vec![
+        ("xray", if cfg!(target_os = "windows") { "xray/xray.exe" } else { "xray/xray" }),
+        ("sing-box", if cfg!(target_os = "windows") { "sing-box/sing-box.exe" } else { "sing-box/sing-box" }),
+        ("dnstt", if cfg!(target_os = "windows") { "dnstt-client.exe" } else { "dnstt-client" }),
+    ];
+
+    for (name, path) in tools {
+        let full_path = app_dir.join(path);
+        if !full_path.exists() {
+            missing.push(name.to_string());
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let ovpn_path = app_dir.join("openvpn/openvpn.exe");
+        if !ovpn_path.exists() {
+            missing.push("openvpn".to_string());
+        }
+    }
+
+    Ok(missing)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -127,7 +157,7 @@ pub fn run() {
 
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![measure_latency])
+    .invoke_handler(tauri::generate_handler![measure_latency, check_system_executables])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

@@ -265,6 +265,10 @@ export const Login = async (credentials: LoginCredentials): Promise<{
       return { success: false, error: data.message || 'Invalid credentials' };
     }
 
+    localStorage.setItem('cc_last_server', credentials.serverAddress);
+    localStorage.setItem('cc_last_user', credentials.username);
+    localStorage.setItem('cc_last_pass', credentials.password);
+
     _token = data.token;
     _serverInfo = data.server_info;
     _account = mapAccount(data.account);
@@ -282,11 +286,22 @@ export const Login = async (credentials: LoginCredentials): Promise<{
   }
 };
 
+export const LoadSavedCredentials = (): LoginCredentials | null => {
+  const server = localStorage.getItem('cc_last_server');
+  const user = localStorage.getItem('cc_last_user');
+  const pass = localStorage.getItem('cc_last_pass');
+  if (server && user && pass) {
+    return { serverAddress: server, username: user, password: pass };
+  }
+  return null;
+};
+
 export const Logout = async (): Promise<void> => {
   if (_isConnected) await DisconnectAll();
   _token = null;
   _account = null;
   _serverInfo = null;
+  localStorage.removeItem('cc_last_pass'); // Only keep server/user if logged out
   addLog('info', 'Logged out');
 };
 
@@ -656,6 +671,16 @@ export const ClearLogs = async (): Promise<void> => { _logs = []; };
 export const ValidateProxyLink = async (link: string): Promise<boolean> =>
   /^(vless|vmess|ss|trojan|wireguard|ikev2|l2tp|dnstt):\/\//.test(link);
 
+export const CheckSystemExecutables = async (): Promise<string[]> => {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return await invoke<string[]>('check_system_executables');
+  } catch (e) {
+    console.error('System check failed:', e);
+    return [];
+  }
+};
+
 export default {
   Login, Logout, GetProtocols, GetV2RaySubProtocols, GetAccountInfo,
   GetServerInfo, ConnectToProtocol, ConnectToProfile, ConnectToConfig,
@@ -663,5 +688,5 @@ export default {
   IsAuthenticated, LoadProfiles, LoadConfigs, AddProfile, DeleteProfile,
   PingProfile, PingAllProfiles, PingAllConfigs, PingProtocol, PingConfig,
   LoadSettings, SaveSettings, GetNetworkSpeed,
-  LoadLogs, ClearLogs, ValidateProxyLink,
+  LoadLogs, ClearLogs, ValidateProxyLink, CheckSystemExecutables, LoadSavedCredentials,
 };

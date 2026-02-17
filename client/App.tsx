@@ -24,6 +24,9 @@ import {
   Logout,
   GetAccountInfo,
   LoadConfigs,
+  CheckSystemExecutables,
+  LoadSavedCredentials,
+  Login,
 } from './services/api';
 import type { ServerInfo, ClientAccount, VPNConfig } from './services/api';
 
@@ -41,6 +44,7 @@ const AppContent: React.FC = () => {
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectedProtocol, setConnectedProtocol] = useState<string | null>(null);
   const [connectionError, setConnectionError] = useState('');
+  const [missingTools, setMissingTools] = useState<string[]>([]);
 
   // Configs state (for resolving config names in status display)
   const [configsMap, setConfigsMap] = useState<Record<string, VPNConfig>>({});
@@ -55,6 +59,33 @@ const AppContent: React.FC = () => {
 
   // Scroll container ref
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Initial Startup Actions
+  useEffect(() => {
+    const startup = async () => {
+      // 1. Check system executables
+      try {
+        const missing = await CheckSystemExecutables();
+        setMissingTools(missing);
+      } catch (e) {
+        console.error('System check failed:', e);
+      }
+
+      // 2. Auto-login if we have saved credentials
+      const saved = LoadSavedCredentials();
+      if (saved) {
+        try {
+          const res = await Login(saved);
+          if (res.success && res.serverInfo && res.account) {
+            handleLoginSuccess(res.serverInfo, res.account);
+          }
+        } catch {
+          // Silent fail on auto-login
+        }
+      }
+    };
+    startup();
+  }, []);
 
   // Connection monitoring
   useEffect(() => {
@@ -297,6 +328,21 @@ const AppContent: React.FC = () => {
                   >
                     ✕
                   </button>
+                </div>
+              </div>
+            )}
+
+            {/* System Check Warning */}
+            {missingTools.length > 0 && (
+              <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-3">
+                <div className="flex items-start space-x-2">
+                  <div className="w-2 h-2 bg-amber-500 rounded-full flex-shrink-0 mt-1.5"></div>
+                  <div className="flex-1">
+                    <p className="text-amber-700 dark:text-amber-300 text-sm font-bold">Engine Missing</p>
+                    <p className="text-amber-600 dark:text-amber-400 text-xs mt-0.5">
+                      The following components are missing: {missingTools.join(', ')}. Some protocols may not work.
+                    </p>
+                  </div>
                 </div>
               </div>
             )}
