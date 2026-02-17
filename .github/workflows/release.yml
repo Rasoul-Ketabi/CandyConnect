@@ -69,7 +69,70 @@ jobs:
       - name: install frontend dependencies
         run: npm install
         working-directory: ./client
+      - name: setup go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - name: build dnstt
+        run: |
+          git clone https://www.bamsoftware.com/git/dnstt.git
+          cd dnstt/dnstt-client
+          go build -ldflags="-s -w" -o ../../dnstt-client${{ matrix.platform == 'windows-latest' && '.exe' || '' }}
+        shell: bash
+      - name: download extra tools
+        run: |
+          mkdir -p extra-tools
+
+          # Fetch latest versions
+          XRAY_VERSION=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep '"tag_name":' | head -n 1 | cut -d'"' -f4)
+          SING_VERSION=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep '"tag_name":' | head -n 1 | cut -d'"' -f4 | sed 's/v//')
+
+          # Platform mapping
+          if [ "${{ matrix.platform }}" == "windows-latest" ]; then
+            XRAY_OS="windows-64"
+            SING_OS="windows-amd64"
+            SING_EXT="zip"
+          elif [ "${{ matrix.platform }}" == "ubuntu-22.04" ]; then
+            XRAY_OS="linux-64"
+            SING_OS="linux-amd64"
+            SING_EXT="tar.gz"
+          else
+            XRAY_OS="macos-64"
+            SING_OS="darwin-amd64"
+            SING_EXT="tar.gz"
+          fi
+
+          # Download Xray
+          echo "Downloading Xray $XRAY_VERSION for $XRAY_OS"
+          curl -L "https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/Xray-$XRAY_OS.zip" -o xray.zip
+          unzip xray.zip -d extra-tools/xray
+
+          # Download Sing-box
+          echo "Downloading Sing-box $SING_VERSION for $SING_OS"
+          curl -L "https://github.com/SagerNet/sing-box/releases/download/v$SING_VERSION/sing-box-$SING_VERSION-$SING_OS.$SING_EXT" -o sing-box.$SING_EXT
+          if [ "$SING_EXT" == "zip" ]; then
+            unzip sing-box.$SING_EXT -d extra-tools/sing-box
+          else
+            tar -xzf sing-box.$SING_EXT -C extra-tools
+            mv extra-tools/sing-box-* extra-tools/sing-box
+          fi
+
+          # Download OpenVPN (Windows only - Using Choco for a reliable binary)
+          if [ "${{ matrix.platform }}" == "windows-latest" ]; then
+            echo "Installing OpenVPN via Chocolatey..."
+            choco install openvpn -y
+            mkdir -p extra-tools/openvpn
+            # Copy common binaries and drivers
+            cp "/c/Program Files/OpenVPN/bin/openvpn.exe" extra-tools/openvpn/
+            cp "/c/Program Files/OpenVPN/bin/openssl.exe" extra-tools/openvpn/ || true
+          fi
+
+          # Cleanup
+          rm -f xray.zip sing-box.$SING_EXT
+          cp dnstt-client${{ matrix.platform == 'windows-latest' && '.exe' || '' }} extra-tools/
+        shell: bash
       - uses: tauri-apps/tauri-action@v0
+        id: tauri_build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -79,93 +142,35 @@ jobs:
           releaseDraft: false
           prerelease: false
           projectPath: ./client
+          args: "--no-bundle" # Only build the binary for the zip package
 
-  mobile-android:
-    needs: [prepare, release]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: "zulu"
-          java-version: "17"
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-      - name: Setup Android NDK
-        id: setup-ndk
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r26d
-      - name: install frontend dependencies
-        run: npm install
-        working-directory: ./client
-      - name: Install Tauri CLI
-        run: npx @tauri-apps/cli --version
-        working-directory: ./client
-      - name: Initialize Android project
-        run: npx tauri android init
-        working-directory: ./client
-        env:
-          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-          JAVA_HOME: ${{ steps.setup-java.outputs.java-home }}
-          ANDROID_HOME: ${{ env.ANDROID_HOME }}
-      - name: Build Android APK
-        run: npx tauri android build --apk
-        working-directory: ./client
-        env:
-          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-          JAVA_HOME: ${{ steps.setup-java.outputs.java-home }}
-          ANDROID_HOME: ${{ env.ANDROID_HOME }}
-      - name: Sign APK with debug key
+      - name: package release zip
         run: |
-          # Find the unsigned APK
-          APK_PATH=$(find client/src-tauri/gen/android -name "*.apk" -type f | head -1)
-          if [ -z "$APK_PATH" ]; then
-            echo "No APK found, trying AAB..."
-            APK_PATH=$(find client/src-tauri/gen/android -name "*.aab" -type f | head -1)
+          mkdir -p bundle
+          if [ "${{ matrix.platform }}" == "windows-latest" ]; then
+            APP_BIN="client/src-tauri/target/release/candy-connect.exe"
+            ZIP_NAME="CandyConnect-${{ needs.prepare.outputs.tag_name }}-windows-x64.zip"
+          elif [ "${{ matrix.platform }}" == "macos-latest" ]; then
+            APP_BIN="client/src-tauri/target/release/candy-connect"
+            ZIP_NAME="CandyConnect-${{ needs.prepare.outputs.tag_name }}-macos-x64.zip"
+          else
+            APP_BIN="client/src-tauri/target/release/candy-connect"
+            ZIP_NAME="CandyConnect-${{ needs.prepare.outputs.tag_name }}-linux-x64.zip"
           fi
-          if [ -n "$APK_PATH" ]; then
-            echo "Found artifact: ${APK_PATH}"
-            # Use zipalign and apksigner if available
-            BUILD_TOOLS=$(ls -d ${ANDROID_HOME}/build-tools/*/ 2>/dev/null | tail -1)
-            if [ -n "$BUILD_TOOLS" ] && [ -f "${BUILD_TOOLS}zipalign" ]; then
-              ALIGNED_APK="${APK_PATH%.apk}-aligned.apk"
-              ${BUILD_TOOLS}zipalign -v 4 "$APK_PATH" "$ALIGNED_APK" && mv "$ALIGNED_APK" "$APK_PATH"
-            fi
-            if [ -n "$BUILD_TOOLS" ] && [ -f "${BUILD_TOOLS}apksigner" ]; then
-              # Generate a debug keystore if not present
-              if [ ! -f ~/.android/debug.keystore ]; then
-                mkdir -p ~/.android
-                keytool -genkey -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Debug,O=Android,C=US"
-              fi
-              ${BUILD_TOOLS}apksigner sign --ks ~/.android/debug.keystore --ks-pass pass:android --key-pass pass:android "$APK_PATH"
-            fi
+          cp "$APP_BIN" bundle/
+          cp -r extra-tools/* bundle/
+          if [ "${{ matrix.platform }}" == "windows-latest" ]; then
+            7z a "$ZIP_NAME" ./bundle/*
+          else
+            cd bundle && zip -r "../$ZIP_NAME" . && cd ..
           fi
-      - name: Find APK files
-        id: find_apk
-        run: |
-          APK_PATH=$(find client/src-tauri/gen/android -name "*.apk" -type f | head -1)
-          if [ -z "$APK_PATH" ]; then
-            echo "No APK found, looking for AAB..."
-            APK_PATH=$(find client/src-tauri/gen/android -name "*.aab" -type f | head -1)
-          fi
-          echo "artifact_path=${APK_PATH}" >> "$GITHUB_OUTPUT"
-          echo "artifact_name=$(basename ${APK_PATH})" >> "$GITHUB_OUTPUT"
-          echo "Found artifact: ${APK_PATH}"
-      - name: Upload Android artifact to release
-        if: steps.find_apk.outputs.artifact_path != ''
+          echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+        shell: bash
+
+      - name: upload custom zip to release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.prepare.outputs.tag_name }}
-          files: ${{ steps.find_apk.outputs.artifact_path }}
-          make_latest: false
+          files: ${{ env.ZIP_NAME }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
