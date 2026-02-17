@@ -1,5 +1,9 @@
 use std::fs;
-use tauri::Manager;
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{TrayIconBuilder, TrayIconEvent},
+    Manager,
+};
 
 fn init_app_files(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let app_data_dir = app
@@ -221,9 +225,52 @@ pub fn run() {
         log::error!("Failed to initialize app files: {}", e);
       }
 
+      // System Tray Setup
+      let show_i = MenuItem::with_id(app, "show", "Show CandyConnect", true, None::<&str>)?;
+      let quit_i = MenuItem::with_id(app, "quit", "Exit App", true, None::<&str>)?;
+      let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+
+      let _tray = TrayIconBuilder::new()
+        .icon(app.default_window_icon().unwrap().clone())
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+           "quit" => {
+               app.exit(0);
+           }
+           "show" => {
+               if let Some(window) = app.get_webview_window("main") {
+                   let _ = window.show();
+                   let _ = window.set_focus();
+               }
+           }
+           _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click { button: tauri::tray::MouseButton::Left, .. } = event {
+                let app = tray.app_handle();
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+        })
+        .build(app)?;
+
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![measure_latency, check_system_executables, is_admin, restart_as_admin])
-    .run(tauri::generate_context!())
-    .expect("error while running tauri application");
+    .build(tauri::generate_context!())
+    .expect("error while building tauri application")
+    .run(|app_handle, event| match event {
+        tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::CloseRequested { api, .. }, .. } => {
+            if label == "main" {
+                api.prevent_close();
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
+        }
+        _ => {}
+    });
 }
