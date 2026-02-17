@@ -110,12 +110,15 @@ jobs:
           # Download Sing-box
           echo "Downloading Sing-box $SING_VERSION for $SING_OS"
           curl -L "https://github.com/SagerNet/sing-box/releases/download/v$SING_VERSION/sing-box-$SING_VERSION-$SING_OS.$SING_EXT" -o sing-box.$SING_EXT
+          mkdir -p sing-box-temp
           if [ "$SING_EXT" == "zip" ]; then
-            unzip sing-box.$SING_EXT -d extra-tools/sing-box
+            unzip sing-box.$SING_EXT -d sing-box-temp
           else
-            tar -xzf sing-box.$SING_EXT -C extra-tools
-            mv extra-tools/sing-box-* extra-tools/sing-box
+            tar -xzf sing-box.$SING_EXT -C sing-box-temp
           fi
+          mkdir -p extra-tools/sing-box
+          mv sing-box-temp/sing-box-*/* extra-tools/sing-box/
+          rm -rf sing-box-temp
 
           # Download OpenVPN (Windows only - Using Choco for a reliable binary)
           if [ "${{ matrix.platform }}" == "windows-latest" ]; then
