@@ -6,6 +6,7 @@ import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import ClientsPage from './pages/ClientsPage';
 import LogsPage from './pages/LogsPage';
+import TunnelPage from './pages/TunnelPage';
 import CoreConfigsPage from './pages/CoreConfigsPage';
 import PanelConfigsPage from './pages/PanelConfigsPage';
 import Sidebar from './components/Sidebar';
@@ -44,6 +45,7 @@ const AppContent: React.FC = () => {
   const renderPage = () => {
     switch (currentPage) {
       case 'clients': return <ClientsPage />;
+      case 'tunnels': return <TunnelPage />;
       case 'logs': return <LogsPage onBack={() => setCurrentPage('dashboard')} />;
       case 'coreconfigs': return <CoreConfigsPage />;
       case 'panelconfigs': return <PanelConfigsPage />;

@@ -163,10 +163,33 @@ export async function deleteClient(id: string): Promise<void> {
 
 // ── Logs ──
 
-export async function getLogs(limit: number = 100): Promise<LogEntry[]> {
-  const res = await request<LogEntry[]>('GET', `/logs?limit=${limit}`);
+export async function getLogs(limit: number = 100, source?: string): Promise<LogEntry[]> {
+  const query = new URLSearchParams({ limit: limit.toString() });
+  if (source) query.set('source', source);
+
+  const res = await request<LogEntry[]>('GET', `/logs?${query.toString()}`);
   if (!res.success || !res.data) throw new Error(res.message);
   return res.data;
+}
+
+export interface Tunnel {
+  id: string; name: string; ip: string; port: number; status: string;
+}
+
+export async function getTunnels(): Promise<Tunnel[]> {
+  const res = await request<Tunnel[]>('GET', '/tunnels');
+  return res.data || [];
+}
+
+export async function addTunnel(data: { ip: string; port: number; name: string; username: string; password?: string }): Promise<{ install_command: string }> {
+  const res = await request<any>('POST', '/tunnels', data);
+  if (!res.success) throw new Error(res.message);
+  return res as any;
+}
+
+export async function deleteTunnel(id: string): Promise<void> {
+  const res = await request<void>('DELETE', `/tunnels/${id}`);
+  if (!res.success) throw new Error(res.message);
 }
 
 // ── VPN Cores ──

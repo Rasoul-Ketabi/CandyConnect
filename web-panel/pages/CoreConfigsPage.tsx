@@ -1,7 +1,38 @@
 import React, { useState, useEffect } from 'react';
-import { getCoreConfigs, updateCoreConfig, restartCore, getCores, type CoreConfigs, type VpnCore } from '../services/api';
+import { getCoreConfigs, updateCoreConfig, restartCore, getCores, getLogs, type LogEntry, type CoreConfigs, type VpnCore } from '../services/api';
 import { useNotify } from '../components/Notification';
-import { Candy, Zap, Shield, Lock, KeyRound, Radio, Globe, Wind, Castle, Settings, Circle, Loader2 } from 'lucide-react';
+import Modal from '../components/Modal';
+import { BtnSecondary } from '../components/UI';
+import { Candy, Zap, Shield, Lock, KeyRound, Radio, Globe, Wind, Castle, Settings, Circle, Loader2, Activity } from 'lucide-react';
+
+const CoreLogViewer: React.FC<{ coreId: string; onClose: () => void }> = ({ coreId, onClose }) => {
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getLogs(50, coreId).then(setLogs).catch(console.error).finally(() => setLoading(false));
+    const interval = setInterval(() => {
+      getLogs(50, coreId).then(setLogs).catch(console.error);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [coreId]);
+
+  return (
+    <Modal open={true} onClose={onClose} title={`Logs: ${coreId.toUpperCase()}`} wide>
+      <div className="space-y-2 max-h-[60vh] overflow-y-auto font-mono text-xs">
+        {loading && logs.length === 0 ? <div className="p-4 text-center"><Loader2 className="animate-spin w-6 h-6 mx-auto text-orange-500" /></div> :
+          logs.length === 0 ? <div className="p-4 text-center text-slate-500">No recent logs found for this core.</div> :
+            logs.map((L, i) => (
+              <div key={i} className="flex gap-2 border-b border-slate-100 dark:border-slate-800 pb-1 mb-1 last:border-0">
+                <span className="text-slate-400 whitespace-nowrap">{L.time.split(' ')[1]}</span>
+                <span className={`font-bold w-12 text-center ${L.level === 'ERROR' ? 'text-red-500' : L.level === 'WARN' ? 'text-amber-500' : 'text-blue-500'}`}>{L.level}</span>
+                <span className="text-slate-700 dark:text-slate-300 break-all">{L.message}</span>
+              </div>
+            ))}
+      </div>
+    </Modal>
+  );
+};
 
 const TABS = [
   { id: 'candyconnect', name: 'CandyConnect', icon: <Candy size={14} /> },
@@ -49,7 +80,8 @@ const WireGuardConfigPanel: React.FC<{
   cfg: CoreConfigs; saving: boolean;
   save: (section: string, data: unknown, name: string) => Promise<void>;
   restart: (id: string, name: string) => Promise<void>;
-}> = ({ cfg, saving, save, restart }) => {
+  viewLogs: (id: string) => void;
+}> = ({ cfg, saving, save, restart, viewLogs }) => {
   const [formData, setFormData] = useState({ ...cfg.wireguard });
 
   useEffect(() => {
@@ -79,6 +111,8 @@ const WireGuardConfigPanel: React.FC<{
       <div className="border-t border-slate-200 dark:border-slate-700 pt-4 flex flex-wrap gap-3">
         <BtnPrimary disabled={saving} onClick={() => save('wireguard', formData, 'WireGuard')}>Save Config</BtnPrimary>
         <BtnWarn onClick={() => restart('wireguard', 'WireGuard')}>Restart Service</BtnWarn>
+        <BtnSecondary onClick={() => viewLogs('wireguard')}><Activity size={14} className="mr-2" /> Logs</BtnSecondary>
+        <BtnSecondary onClick={() => alert("Interface management coming soon (use Bind Interface for now)")}><div className="flex items-center gap-2 font-bold text-slate-500"><Settings size={14} /><span>Add Interface</span></div></BtnSecondary>
       </div>
     </Card>
   );
@@ -91,7 +125,8 @@ const SimpleConfigPanel: React.FC<{
   toggles: { label: string; key: string; value: boolean }[];
   save: (section: string, data: unknown, name: string) => Promise<void>;
   restart: (id: string, name: string) => Promise<void>;
-}> = ({ id, title, cfg, cores, saving, fields, toggles, save, restart }) => {
+  viewLogs: (id: string) => void;
+}> = ({ id, title, cfg, cores, saving, fields, toggles, save, restart, viewLogs }) => {
   const sectionKey = id as keyof CoreConfigs;
   const [formData, setFormData] = useState<Record<string, any>>({ ...(cfg[sectionKey] as any) });
 
@@ -128,6 +163,7 @@ const SimpleConfigPanel: React.FC<{
       <div className="border-t border-slate-200 dark:border-slate-700 pt-4 flex flex-wrap gap-3">
         <BtnPrimary disabled={saving} onClick={() => save(id, formData, title)}>Save Config</BtnPrimary>
         <BtnWarn onClick={() => restart(id, title.split(' ')[0])}>Restart Service</BtnWarn>
+        <BtnSecondary onClick={() => viewLogs(id)}><Activity size={14} className="mr-2" /> Logs</BtnSecondary>
       </div>
     </Card>
   );
@@ -140,6 +176,7 @@ const CoreConfigsPage: React.FC = () => {
   const [cores, setCores] = useState<VpnCore[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [logModalCore, setLogModalCore] = useState<string | null>(null);
 
   // Editable state
   const [ccDomain, setCcDomain] = useState('');
@@ -235,11 +272,11 @@ const CoreConfigsPage: React.FC = () => {
   );
 
   const renderWireGuard = () => (
-    <WireGuardConfigPanel cfg={cfg} saving={saving} save={save} restart={restart} />
+    <WireGuardConfigPanel cfg={cfg} saving={saving} save={save} restart={restart} viewLogs={setLogModalCore} />
   );
 
   const renderSimpleConfig = (id: string, title: string, fields: { label: string; key: string; type?: string; options?: string[]; value: any; readOnly?: boolean }[], toggles: { label: string; key: string; value: boolean }[] = []) => (
-    <SimpleConfigPanel key={id} id={id} title={title} cfg={cfg} cores={cores} saving={saving} fields={fields} toggles={toggles} save={save} restart={restart} />
+    <SimpleConfigPanel key={id} id={id} title={title} cfg={cfg} cores={cores} saving={saving} fields={fields} toggles={toggles} save={save} restart={restart} viewLogs={setLogModalCore} />
   );
 
   const renderTab = () => {
@@ -309,6 +346,7 @@ const CoreConfigsPage: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
+      {logModalCore && <CoreLogViewer coreId={logModalCore} onClose={() => setLogModalCore(null)} />}
       <div>
         <h1 className="text-2xl font-black text-slate-800 dark:text-slate-200 flex items-center gap-2"><Settings className="w-8 h-8 text-orange-500" /> Core Configs</h1>
         <p className="text-xs text-slate-500 dark:text-slate-400">Configure VPN protocol cores</p>

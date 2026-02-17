@@ -140,9 +140,47 @@ async def delete_client(id: str, user=Depends(auth.require_admin)):
 # ── Logs ──
 
 @router.get("/logs")
-async def get_logs(limit: int = 100, user=Depends(auth.require_admin)):
-    logs = await db.get_logs(limit)
+async def get_logs(limit: int = 100, source: Optional[str] = None, user=Depends(auth.require_admin)):
+    logs = await db.get_logs(limit, source)
     return {"success": True, "message": "Logs fetched", "data": logs}
+
+# ── Tunnels ──
+
+class TunnelRequest(BaseModel):
+    ip: str
+    port: int
+    name: str
+    username: str = "root"
+    password: Optional[str] = None
+
+@router.get("/tunnels")
+async def get_tunnels(user=Depends(auth.require_admin)):
+    tunnels = await db.get_tunnels()
+    return {"success": True, "data": tunnels}
+
+@router.post("/tunnels")
+async def add_tunnel(req: TunnelRequest, user=Depends(auth.require_admin)):
+    tunnel = await db.add_tunnel(req.ip, req.port, req.name, req.username, req.password)
+    
+    # Generate install command
+    # Use current server IP as master
+    server_info = await get_server_info()
+    master_ip = server_info.get("ip", "YOUR_SERVER_IP")
+    
+    # Generates a command to run on the remote tunnel server
+    install_cmd = f"curl -fsSL https://get.candyconnect.io/tunnel | sudo bash -s -- --master {master_ip}:8443 --secret {tunnel['id']}"
+    
+    return {
+        "success": True, 
+        "message": "Tunnel added", 
+        "data": tunnel, 
+        "install_command": install_cmd
+    }
+
+@router.delete("/tunnels/{id}")
+async def delete_tunnel(id: str, user=Depends(auth.require_admin)):
+    await db.delete_tunnel(id)
+    return {"success": True, "message": "Tunnel deleted"}
 
 # ── VPN Cores ──
 

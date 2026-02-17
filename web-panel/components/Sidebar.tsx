@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Users, Settings, Wrench, LogOut, Activity } from 'lucide-react';
+import { LayoutDashboard, Users, Settings, Wrench, LogOut, Activity, Network } from 'lucide-react';
 import { getPanel, type PanelData } from '../services/api';
 import GreenCandy from '../assets/green-candy.svg';
 import RedCandy from '../assets/red-candy.svg';
@@ -15,6 +15,7 @@ interface SidebarProps {
 const pages = [
   { id: 'dashboard', title: 'Dashboard', icon: LayoutDashboard },
   { id: 'clients', title: 'Clients', icon: Users },
+  { id: 'tunnels', title: 'Tunnels', icon: Network },
   { id: 'logs', title: 'System Logs', icon: Activity },
   { id: 'coreconfigs', title: 'Core Configs', icon: Settings },
   { id: 'panelconfigs', title: 'Panel Configs', icon: Wrench },

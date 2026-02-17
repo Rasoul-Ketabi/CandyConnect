@@ -2,7 +2,7 @@
 CandyConnect Server - Redis Database Layer
 All data is stored in Redis with JSON serialization.
 """
-import json, time, uuid, hashlib, logging
+import json, time, uuid, hashlib, logging, secrets
 from typing import Optional
 import bcrypt
 import redis.asyncio as redis
@@ -576,10 +576,48 @@ async def add_log(level: str, source: str, message: str):
     await _add_log(level, source, message)
 
 
-async def get_logs(limit: int = 100) -> list[dict]:
+
+async def get_logs(limit: int = 100, source: str = None) -> list[dict]:
     r = await get_redis()
-    raw = await r.lrange(K_LOGS, 0, limit - 1)
-    return [json.loads(entry) for entry in raw]
+    # Fetch all logs (capped at 1000 by trim) to filter correctly
+    raw = await r.lrange(K_LOGS, 0, -1)
+    logs = [json.loads(entry) for entry in raw]
+    
+    if source:
+        source_lower = source.lower()
+        logs = [l for l in logs if l.get("source", "").lower() == source_lower]
+        
+    return logs[:limit]
+
+
+# ── Tunnels ──
+
+K_TUNNELS = "candyconnect:tunnels"
+
+async def add_tunnel(ip: str, port: int, name: str, username: str = "root", password: Optional[str] = None) -> dict:
+    r = await get_redis()
+    tunnel_id = secrets.token_hex(4)
+    tunnel = {
+        "id": tunnel_id,
+        "name": name,
+        "ip": ip,
+        "port": port,
+        "username": username,
+        "ssh_password": password,
+        "created_at": int(time.time()),
+        "status": "pending",  # pending, installed
+    }
+    await r.hset(K_TUNNELS, tunnel_id, json.dumps(tunnel))
+    return tunnel
+
+async def get_tunnels() -> list[dict]:
+    r = await get_redis()
+    raw = await r.hgetall(K_TUNNELS)
+    return [json.loads(val) for val in raw.values()]
+
+async def delete_tunnel(tunnel_id: str) -> bool:
+    r = await get_redis()
+    return await r.hdel(K_TUNNELS, tunnel_id) > 0
 
 
 # ── Client Count ──
