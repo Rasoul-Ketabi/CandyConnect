@@ -181,7 +181,7 @@ export async function getTunnels(): Promise<Tunnel[]> {
   return res.data || [];
 }
 
-export async function addTunnel(data: { ip: string; port: number; name: string; username: string; password?: string }): Promise<{ install_command: string }> {
+export async function addTunnel(data: { ip: string; port: number; name: string; username: string; password?: string; tunnel_type: string }): Promise<{ install_command: string }> {
   const res = await request<any>('POST', '/tunnels', data);
   if (!res.success) throw new Error(res.message);
   return res as any;

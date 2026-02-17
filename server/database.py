@@ -594,7 +594,7 @@ async def get_logs(limit: int = 100, source: str = None) -> list[dict]:
 
 K_TUNNELS = "candyconnect:tunnels"
 
-async def add_tunnel(ip: str, port: int, name: str, username: str = "root", password: Optional[str] = None) -> dict:
+async def add_tunnel(ip: str, port: int, name: str, username: str = "root", password: Optional[str] = None, tunnel_type: str = "backhaul") -> dict:
     r = await get_redis()
     tunnel_id = secrets.token_hex(4)
     tunnel = {
@@ -604,6 +604,7 @@ async def add_tunnel(ip: str, port: int, name: str, username: str = "root", pass
         "port": port,
         "username": username,
         "ssh_password": password,
+        "type": tunnel_type,
         "created_at": int(time.time()),
         "status": "pending",  # pending, installed
     }
@@ -614,6 +615,16 @@ async def get_tunnels() -> list[dict]:
     r = await get_redis()
     raw = await r.hgetall(K_TUNNELS)
     return [json.loads(val) for val in raw.values()]
+
+async def update_tunnel_status(tunnel_id: str, status: str) -> bool:
+    r = await get_redis()
+    raw = await r.hget(K_TUNNELS, tunnel_id)
+    if not raw:
+        return False
+    tunnel = json.loads(raw)
+    tunnel["status"] = status
+    await r.hset(K_TUNNELS, tunnel_id, json.dumps(tunnel))
+    return True
 
 async def delete_tunnel(tunnel_id: str) -> bool:
     r = await get_redis()

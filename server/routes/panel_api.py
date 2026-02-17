@@ -3,8 +3,10 @@ CandyConnect Server - Panel API Router
 Defines all endpoints for the web management panel.
 """
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, BackgroundTasks
 from pydantic import BaseModel
+import paramiko
+import time
 
 import database as db
 import auth
@@ -152,15 +154,44 @@ class TunnelRequest(BaseModel):
     name: str
     username: str = "root"
     password: Optional[str] = None
+    tunnel_type: str = "backhaul"
 
 @router.get("/tunnels")
 async def get_tunnels(user=Depends(auth.require_admin)):
     tunnels = await db.get_tunnels()
     return {"success": True, "data": tunnels}
 
+async def background_install_tunnel(tunnel_id: str, ip: str, port: int, username: str, password: str, cmd: str):
+    await db.update_tunnel_status(tunnel_id, "installing")
+    await db.add_log("INFO", "tunnel", f"Starting SSH installation for tunnel {tunnel_id} on {ip}...")
+
+    def _sync_ssh():
+        try:
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(ip, port=port, username=username, password=password, timeout=15)
+            # Execute command
+            stdin, stdout, stderr = client.exec_command(cmd)
+            exit_status = stdout.channel.recv_exit_status()
+            out_msg = stdout.read().decode().strip()
+            err_msg = stderr.read().decode().strip()
+            client.close()
+            return exit_status == 0, out_msg, err_msg
+        except Exception as e:
+            return False, "", str(e)
+
+    success, out, err = await auth.run_in_threadpool(_sync_ssh)
+    
+    if success:
+        await db.update_tunnel_status(tunnel_id, "installed")
+        await db.add_log("INFO", "tunnel", f"Tunnel {tunnel_id} installed successfully.")
+    else:
+        await db.update_tunnel_status(tunnel_id, "failed")
+        await db.add_log("ERROR", "tunnel", f"Tunnel {tunnel_id} installation failed: {err}")
+
 @router.post("/tunnels")
-async def add_tunnel(req: TunnelRequest, user=Depends(auth.require_admin)):
-    tunnel = await db.add_tunnel(req.ip, req.port, req.name, req.username, req.password)
+async def add_tunnel(req: TunnelRequest, tasks: BackgroundTasks, user=Depends(auth.require_admin)):
+    tunnel = await db.add_tunnel(req.ip, req.port, req.name, req.username, req.password, req.tunnel_type)
     
     # Generate install command
     # Use current server IP as master
@@ -168,11 +199,14 @@ async def add_tunnel(req: TunnelRequest, user=Depends(auth.require_admin)):
     master_ip = server_info.get("ip", "YOUR_SERVER_IP")
     
     # Generates a command to run on the remote tunnel server
-    install_cmd = f"curl -fsSL https://get.candyconnect.io/tunnel | sudo bash -s -- --master {master_ip}:8443 --secret {tunnel['id']}"
+    install_cmd = f"curl -fsSL https://get.candyconnect.io/tunnel | sudo bash -s -- --master {master_ip}:8443 --secret {tunnel['id']} --type {req.tunnel_type}"
+    
+    if req.ip and req.password:
+        tasks.add_task(background_install_tunnel, tunnel['id'], req.ip, req.port, req.username, req.password, install_cmd)
     
     return {
         "success": True, 
-        "message": "Tunnel added", 
+        "message": "Tunnel added. installation started via SSH" if req.password else "Tunnel added. password missing for SSH install", 
         "data": tunnel, 
         "install_command": install_cmd
     }
