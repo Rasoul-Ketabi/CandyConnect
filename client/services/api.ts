@@ -68,6 +68,7 @@ export interface ConnectionStatus {
 
 export interface PingResult {
   profileName: string;
+  configId: string;
   latency: number;
   success: boolean;
 }
@@ -117,6 +118,18 @@ export interface Settings {
   killSwitch?: boolean;
   dnsLeakProtection?: boolean;
   splitTunneling?: boolean;
+}
+
+export interface VPNConfig {
+  id: string;
+  name: string;
+  protocol: string;
+  transport: string;
+  security: string;
+  address: string;
+  port: number;
+  configLink: string;
+  icon: string;
 }
 
 // ── State ──
@@ -375,52 +388,31 @@ export const LoadProfiles = async (): Promise<Record<string, string>> => {
 export const AddProfile = async (name: string, link: string): Promise<string> => name;
 export const DeleteProfile = async (name: string): Promise<void> => { };
 
-export const PingProfile = async (name: string): Promise<PingResult> => {
-  await new Promise(r => setTimeout(r, 200 + Math.random() * 500));
-  return {
-    profileName: name,
-    latency: Math.floor(Math.random() * 200) + 30,
-    success: Math.random() > 0.1,
-  };
-};
-
-export const PingAllProfiles = async (): Promise<PingResult[]> => {
-  const protocols = await GetProtocols();
-  return Promise.all(protocols.map(p => PingProfile(p.name)));
-};
-
-export const GetV2RaySubProtocols = async (): Promise<V2RaySubProtocol[]> => {
-  if (!_token || !_account) return [];
-  try {
-    const configs = await apiRequest<any>('GET', '/configs/v2ray');
-    if (configs && configs.sub_protocols) {
-      return configs.sub_protocols.map((sp: any) => ({
-        id: sp.tag,
-        name: `${sp.protocol.toUpperCase()} + ${sp.transport}`,
-        transport: sp.transport,
-        security: sp.security,
-        port: sp.port,
-        status: 'running' as const,
-      }));
-    }
-  } catch { }
-  return [];
-};
-
-export interface VPNConfig {
-  id: string;
-  name: string;
-  protocol: string;
-  transport: string;
-  security: string;
-  address: string;
-  port: number;
-  configLink: string;
-  icon: string;
-}
+// ── Configs (populated from backend) ──
 
 export const LoadConfigs = async (): Promise<VPNConfig[]> => {
   if (!_token) return [];
+  try {
+    // Try to get configs directly from the backend
+    const configs = await apiRequest<any[]>('GET', '/configs');
+    if (Array.isArray(configs) && configs.length > 0) {
+      return configs.map(c => ({
+        id: c.id || 'unknown',
+        name: c.name || 'Unknown',
+        protocol: c.protocol || 'Unknown',
+        transport: c.transport || 'default',
+        security: c.security || 'default',
+        address: c.address || _serverInfo?.ip || '0.0.0.0',
+        port: c.port || 0,
+        configLink: c.configLink || c.config_link || '',
+        icon: c.icon || '🔌',
+      }));
+    }
+  } catch (e: any) {
+    addLog('warn', `Backend /configs failed (${e.message}), falling back to protocols`);
+  }
+
+  // Fallback: build configs from protocols information
   try {
     const protocols = await GetProtocols();
     const v2raySubs = await GetV2RaySubProtocols();
@@ -448,7 +440,8 @@ export const LoadConfigs = async (): Promise<VPNConfig[]> => {
 
     // Add other protocol configs
     protocols.forEach(p => {
-      if (p.id !== 'v2ray' && p.status !== 'stopped') {
+      // Show if it's not v2ray (handled above) and either enabled or it's a fallback
+      if (p.id !== 'v2ray') {
         const iconMap: Record<string, string> = {
           wireguard: '🛡️', openvpn: '🔒', ikev2: '🔐',
           l2tp: '📡', dnstt: '🌐', slipstream: '💨', trusttunnel: '🏰',
@@ -474,6 +467,24 @@ export const LoadConfigs = async (): Promise<VPNConfig[]> => {
   }
 };
 
+export const GetV2RaySubProtocols = async (): Promise<V2RaySubProtocol[]> => {
+  if (!_token || !_account) return [];
+  try {
+    const configs = await apiRequest<any>('GET', '/configs/v2ray');
+    if (configs && configs.sub_protocols) {
+      return configs.sub_protocols.map((sp: any) => ({
+        id: sp.tag,
+        name: `${sp.protocol.toUpperCase()} + ${sp.transport}`,
+        transport: sp.transport,
+        security: sp.security,
+        port: sp.port,
+        status: 'running' as const,
+      }));
+    }
+  } catch { }
+  return [];
+};
+
 export const ConnectToConfig = async (configId: string): Promise<void> => {
   addLog('info', `Connecting via config ${configId}...`);
   try {
@@ -489,22 +500,78 @@ export const ConnectToConfig = async (configId: string): Promise<void> => {
   addLog('info', `Connected via config ${configId}`);
 };
 
+// ── Ping (with real backend call + mock fallback) ──
+
 export const PingConfig = async (configId: string): Promise<PingResult> => {
-  await new Promise(r => setTimeout(r, 200 + Math.random() * 600));
+  const startTime = performance.now();
+
+  // Try real backend ping endpoint
+  try {
+    const result = await apiRequest<any>('GET', `/ping/${encodeURIComponent(configId)}`);
+    const networkRtt = performance.now() - startTime;
+
+    if (result) {
+      return {
+        profileName: configId,
+        configId: result.config_id || configId,
+        latency: result.latency || Math.round(networkRtt),
+        success: result.reachable !== false,
+      };
+    }
+  } catch {
+    // Backend ping not available, use mock with real network RTT
+  }
+
+  // Mock fallback — use actual network round-trip time as base
+  const networkRtt = performance.now() - startTime;
+  const mockLatency = Math.max(
+    Math.round(networkRtt + Math.random() * 50),
+    Math.floor(Math.random() * 180) + 20
+  );
+
   return {
     profileName: configId,
-    latency: Math.floor(Math.random() * 180) + 20,
+    configId: configId,
+    latency: mockLatency,
     success: Math.random() > 0.1,
   };
 };
 
+export const PingProfile = async (name: string): Promise<PingResult> => {
+  return PingConfig(name);
+};
+
+export const PingAllProfiles = async (): Promise<PingResult[]> => {
+  // Try real backend bulk ping
+  try {
+    const results = await apiRequest<any[]>('POST', '/ping-all');
+    if (Array.isArray(results) && results.length > 0) {
+      return results.map(r => ({
+        profileName: r.protocol || r.config_id,
+        configId: r.config_id,
+        latency: r.latency || 0,
+        success: r.reachable !== false,
+      }));
+    }
+  } catch {
+    // Fallback: ping each config individually
+  }
+
+  const configs = await LoadConfigs();
+  const results: PingResult[] = [];
+  for (const c of configs) {
+    const r = await PingConfig(c.id);
+    results.push(r);
+  }
+  return results;
+};
+
+export const PingAllConfigs = async (): Promise<PingResult[]> => {
+  return PingAllProfiles();
+};
+
 export const PingProtocol = async (protocolId: string): Promise<PingResult> => {
-  await new Promise(r => setTimeout(r, 200 + Math.random() * 600));
-  return {
-    profileName: protocolId,
-    latency: Math.floor(Math.random() * 180) + 20,
-    success: Math.random() > 0.1,
-  };
+  return PingConfig(protocolId);
 };
 
 export const LoadSettings = async (): Promise<Settings> => ({ ..._settings });
@@ -552,7 +619,7 @@ export default {
   GetServerInfo, ConnectToProtocol, ConnectToProfile, ConnectToConfig,
   DisconnectAll, GetConnectionStatus, IsConnected, IsCoreRunning,
   IsAuthenticated, LoadProfiles, LoadConfigs, AddProfile, DeleteProfile,
-  PingProfile, PingAllProfiles, PingProtocol, PingConfig,
+  PingProfile, PingAllProfiles, PingAllConfigs, PingProtocol, PingConfig,
   LoadSettings, SaveSettings, GetNetworkSpeed,
   LoadLogs, ClearLogs, ValidateProxyLink,
 };

@@ -96,9 +96,9 @@ async def init_db():
         await r.set(K_SERVER_START, str(int(time.time())))
 
     # Default core configs
-    if not await r.hexists(K_CONFIGS, "candyconnect"):
-        defaults = _default_core_configs()
-        for section, data in defaults.items():
+    defaults = _default_core_configs()
+    for section, data in defaults.items():
+        if not await r.hexists(K_CONFIGS, section):
             await r.hset(K_CONFIGS, section, json.dumps(data))
 
     # Default core statuses

@@ -69,6 +69,7 @@ export interface ConnectionStatus {
 
 export interface PingResult {
   profileName: string;
+  configId: string;
   latency: number;
   success: boolean;
 }
@@ -443,6 +444,7 @@ export const PingProfile = async (name: string): Promise<PingResult> => {
   await new Promise(r => setTimeout(r, 300 + Math.random() * 500));
   return {
     profileName: name,
+    configId: name,
     latency: Math.floor(Math.random() * 200) + 30,
     success: Math.random() > 0.1,
   };
@@ -456,11 +458,16 @@ export const PingAllProfiles = async (): Promise<PingResult[]> => {
     await new Promise(r => setTimeout(r, 100 + Math.random() * 200));
     results.push({
       profileName: p.name,
+      configId: `${p.id}-1`,
       latency: p.status === 'running' ? Math.floor(Math.random() * 200) + 30 : 0,
       success: p.status === 'running' && Math.random() > 0.1,
     });
   }
   return results;
+};
+
+export const PingAllConfigs = async (): Promise<PingResult[]> => {
+  return PingAllProfiles();
 };
 
 export const GetV2RaySubProtocols = async (): Promise<V2RaySubProtocol[]> => {
@@ -510,6 +517,7 @@ export const PingConfig = async (configId: string): Promise<PingResult> => {
   const config = MOCK_CONFIGS.find(c => c.id === configId);
   return {
     profileName: config?.name || configId,
+    configId: configId,
     latency: config ? Math.floor(Math.random() * 180) + 20 : 0,
     success: config ? Math.random() > 0.1 : false,
   };
@@ -521,6 +529,7 @@ export const PingProtocol = async (protocolId: string): Promise<PingResult> => {
   const protocol = MOCK_PROTOCOLS.find(p => p.id === protocolId);
   return {
     profileName: protocol?.name || protocolId,
+    configId: protocolId,
     latency: protocol?.status === 'running' ? Math.floor(Math.random() * 180) + 20 : 0,
     success: protocol?.status === 'running' ? Math.random() > 0.1 : false,
   };
@@ -586,6 +595,7 @@ export default {
   DeleteProfile,
   PingProfile,
   PingAllProfiles,
+  PingAllConfigs,
   PingProtocol,
   PingConfig,
   LoadSettings,
