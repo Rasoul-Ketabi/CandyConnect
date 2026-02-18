@@ -21,7 +21,7 @@ const LogsPage: React.FC<LogsPageProps> = ({ onBack }) => {
   const [autoScroll, setAutoScroll] = useState(true);
   const terminalRef = useRef<HTMLDivElement>(null);
 
-  // Load logs from backend
+  // Load logs from backend with polling for real-time updates
   useEffect(() => {
     const loadLogs = async () => {
       try {
@@ -29,10 +29,11 @@ const LogsPage: React.FC<LogsPageProps> = ({ onBack }) => {
         setLogs(backendLogs);
       } catch (error) {
         console.error('Failed to load logs:', error);
-        setLogs([]);
       }
     };
     loadLogs();
+    const interval = setInterval(loadLogs, 2000);
+    return () => clearInterval(interval);
   }, []);
 
   // Auto-scroll to bottom when new logs arrive

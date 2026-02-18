@@ -4,7 +4,6 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { MoonIcon, SunIcon, ArrowLeftIcon, CpuIcon, NetworkIcon, ShieldIcon } from './icons';
 import LanguageSelector from './LanguageSelector';
 import AutoUpdateToggle from './AutoUpdateToggle';
-import CoreSelector from './CoreSelector';
 import { LoadSettings, SaveSettings } from '../services/api';
 import { Settings } from '../services/api';
 
@@ -56,15 +55,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
   const handleToggle = (key: keyof Settings) => {
     if (!settings) return;
     const updatedSettings = { ...settings, [key]: !settings[key] };
-    handleSaveSettings(updatedSettings);
-  };
-
-  const handleCoreChange = (coreType: string, value: string) => {
-    if (!settings) return;
-    const updatedSettings: Settings = {
-      ...settings,
-      [coreType === 'v2ray' ? 'v2rayCore' : 'wireguardCore']: value,
-    };
     handleSaveSettings(updatedSettings);
   };
 
@@ -169,20 +159,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
       {/* Connection */}
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('general')}</h3>
-        <ToggleRow
-          icon={<NetworkIcon className="w-5 h-5" />}
-          title={t('autoReconnect')}
-          desc={t('autoReconnectDesc')}
-          value={settings?.autoReconnect || false}
-          onToggle={() => handleToggle('autoReconnect')}
-        />
-        <ToggleRow
-          icon={<NetworkIcon className="w-5 h-5" />}
-          title={t('splitTunneling')}
-          desc={t('splitTunnelingDesc')}
-          value={settings?.splitTunneling || false}
-          onToggle={() => handleToggle('splitTunneling')}
-        />
         <AutoUpdateToggle />
       </div>
 

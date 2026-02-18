@@ -376,20 +376,40 @@ async def get_protocol_config(protocol: str, payload=Depends(auth.require_client
         raise HTTPException(status_code=404, detail="Client not found")
     
     # Check normalized keys
-    raw_protocols = client.get("protocols", {})
+    raw_protocols = client.get("protocols", {}) or {}
     client_protocols = {str(k).lower(): v for k, v in raw_protocols.items()}
+
+    # Mapping of sub-protocol IDs to core protocol IDs
+    proto_map = {
+        "vless": "v2ray", "vmess": "v2ray", "trojan": "v2ray", 
+        "shadowsocks": "v2ray", "wireguard": "wireguard",
+        "openvpn": "openvpn", "ikev2": "ikev2", "l2tp": "l2tp",
+        "dnstt": "dnstt", "slipstream": "slipstream",
+        "trusttunnel": "trusttunnel",
+    }
     
-    if not client_protocols.get(protocol.lower()):
-        raise HTTPException(status_code=403, detail=f"Protocol {protocol} not allowed for this account")
+    # 1. Identify core protocol
+    # If protocol is "vless-tcp", root is "vless", which maps to "v2ray"
+    proto_root = protocol.split("-")[0].lower()
+    core_protocol = proto_map.get(proto_root, proto_root)
+    
+    # 2. Check if admin override (Admins have access to all)
+    admin_user = await db.get_admin_username()
+    is_admin = client["username"] == admin_user
+    
+    if not is_admin and not client_protocols.get(core_protocol):
+        raise HTTPException(status_code=403, detail=f"Protocol {protocol} ({core_protocol}) not allowed for this account")
     
     # Get panel config for IP
     panel_cfg = await db.get_core_config("candyconnect") or {}
     server_ip = panel_cfg.get("server_ip") or await get_public_ip()
-    p_mgr = protocol_manager.get_protocol(protocol)
+    
+    # Use core_protocol to get the manager (v2ray, wireguard, etc.)
+    p_mgr = protocol_manager.get_protocol(core_protocol)
     if not p_mgr:
-        raise HTTPException(status_code=404, detail="Protocol manager not found")
+        raise HTTPException(status_code=404, detail=f"Protocol manager for {core_protocol} not found")
         
-    pdata = (client.get("protocol_data", {}) or {}).get(protocol, {})
+    pdata = (client.get("protocol_data", {}) or {}).get(core_protocol, {})
     config = await p_mgr.get_client_config(client["username"], server_ip, pdata)
     
     return {"success": True, "data": config}

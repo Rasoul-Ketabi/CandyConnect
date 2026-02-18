@@ -203,9 +203,14 @@ async function apiRequest<T>(method: string, path: string, body?: unknown): Prom
   return data.data !== undefined ? data.data : data;
 }
 
-function addLog(level: string, message: string) {
+async function addLog(level: string, message: string) {
   _logs.push({ timestamp: new Date().toISOString(), level, message });
   if (_logs.length > 500) _logs.splice(0, _logs.length - 500);
+
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('write_log', { level, message });
+  } catch { }
 }
 
 function mapAccount(account: any): ClientAccount {
@@ -350,19 +355,9 @@ export const GetServerInfo = async (): Promise<ServerInfo | null> => {
 };
 
 export const ConnectToProtocol = async (protocolId: string): Promise<void> => {
-  addLog('info', `Connecting via ${protocolId}...`);
-  // Report connection to server
-  try {
-    await apiRequest('POST', '/connect', { protocol: protocolId });
-  } catch {
-    // Server tracking is optional
-  }
-  _isConnected = true;
-  _connectedProtocol = protocolId;
-  _connectionStartTime = new Date().toISOString();
-  _sessionDownload = 0;
-  _sessionUpload = 0;
-  addLog('info', `Connected via ${protocolId}`);
+  // This is now purely for legacy/manual notifications if needed.
+  // Real logic should use ConnectToConfig.
+  addLog('info', `Legacy notify for ${protocolId}...`);
 };
 
 export const ConnectToProfile = async (name: string): Promise<void> => {
@@ -370,11 +365,22 @@ export const ConnectToProfile = async (name: string): Promise<void> => {
 };
 
 export const DisconnectAll = async (): Promise<void> => {
-  const prev = _connectedProtocol;
+  addLog('info', 'Disconnecting everything...');
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('stop_vpn');
+
+    // Optional: Notify server
+    if (_connectedProtocol) {
+      await apiRequest('POST', '/disconnect', { protocol: _connectedProtocol });
+    }
+  } catch (e) {
+    console.error('Disconnect error:', e);
+  }
   _isConnected = false;
   _connectedProtocol = null;
   _connectionStartTime = null;
-  addLog('info', `Disconnected from ${prev || 'server'}`);
+  addLog('info', 'All connections stopped');
 };
 
 export const GetConnectionStatus = async (): Promise<ConnectionStatus> => ({
@@ -384,6 +390,33 @@ export const GetConnectionStatus = async (): Promise<ConnectionStatus> => ({
   startTime: _connectionStartTime,
   serverAddress: _serverInfo?.ip || null,
 });
+
+// Called when the backend emits vpn-disconnected (xray/sing-box process exited)
+export const handleVpnDisconnected = (): void => {
+  if (_isConnected) {
+    addLog('warn', 'VPN process exited unexpectedly — disconnected');
+  }
+  _isConnected = false;
+  _connectedProtocol = null;
+  _connectionStartTime = null;
+};
+
+// Sets up a Tauri event listener for vpn-disconnected and returns an unlisten function
+export const setupDisconnectListener = async (
+  onDisconnected?: () => void
+): Promise<(() => void) | null> => {
+  try {
+    const { listen } = await import('@tauri-apps/api/event');
+    const unlisten = await listen('vpn-disconnected', () => {
+      handleVpnDisconnected();
+      if (onDisconnected) onDisconnected();
+    });
+    return unlisten;
+  } catch (e) {
+    console.error('Failed to setup vpn-disconnected listener:', e);
+    return null;
+  }
+};
 
 export const IsConnected = async (): Promise<boolean> => _isConnected;
 export const IsCoreRunning = async (): Promise<boolean> => _isConnected;
@@ -511,16 +544,49 @@ export const GetV2RaySubProtocols = async (): Promise<V2RaySubProtocol[]> => {
 export const ConnectToConfig = async (configId: string): Promise<void> => {
   addLog('info', `Connecting via config ${configId}...`);
   try {
-    await apiRequest('POST', '/connect', { protocol: configId });
-  } catch {
-    // Server tracking is optional
+    // 1. Fetch full configuration from the server
+    const configData = await apiRequest<any>('GET', `/configs/${encodeURIComponent(configId)}`);
+    if (!configData || !configData.config_json) {
+      throw new Error('Server returned invalid or empty configuration');
+    }
+
+    const { invoke } = await import('@tauri-apps/api/core');
+
+    // 2. Prepare connection mode
+    const mode = _settings.proxyMode === 'tun' ? 'tun' : 'proxy';
+    addLog('info', `Engine mode: ${mode.toUpperCase()}`);
+
+    // 3. Start the engine in the background via Rust
+    // The Rust command saves the file and spawns the process
+    await invoke('start_vpn', {
+      configJson: JSON.stringify(configData.config_json),
+      mode: mode,
+    });
+
+    // 3.5 Log connection to server
+    try {
+      await apiRequest('POST', '/connect', {
+        protocol: configId,
+        event: 'connect',
+        ip: configData.server || '0.0.0.0'
+      });
+    } catch { }
+
+    // 4. Update local state
+    _isConnected = true;
+    _connectedProtocol = configId;
+    _connectionStartTime = new Date().toISOString();
+    _sessionDownload = 0;
+    _sessionUpload = 0;
+
+    addLog('info', `Connected successfully via ${configId}`);
+
+  } catch (error: any) {
+    addLog('error', `Connection failed: ${error.message}`);
+    _isConnected = false;
+    _connectedProtocol = null;
+    throw error;
   }
-  _isConnected = true;
-  _connectedProtocol = configId;
-  _connectionStartTime = new Date().toISOString();
-  _sessionDownload = 0;
-  _sessionUpload = 0;
-  addLog('info', `Connected via config ${configId}`);
 };
 
 // ── Ping (with real backend call + mock fallback) ──
@@ -667,8 +733,28 @@ export const GetNetworkSpeed = async (): Promise<NetworkSpeed> => {
   };
 };
 
-export const LoadLogs = async (): Promise<Array<{ timestamp: string; level: string; message: string }>> => [..._logs];
-export const ClearLogs = async (): Promise<void> => { _logs = []; };
+export const LoadLogs = async (): Promise<Array<{ timestamp: string; level: string; message: string }>> => {
+  try {
+    const { readTextFile, BaseDirectory } = await import('@tauri-apps/plugin-fs');
+    const content = await readTextFile('candy.logs', { baseDir: BaseDirectory.AppData });
+    if (content) {
+      // Handle the JSONL format: each line is a JSON object
+      const lines = content.split('\n').filter(l => l.trim().length > 0);
+      return lines.map(l => JSON.parse(l)).reverse(); // Newest first
+    }
+  } catch (e) {
+    console.debug('Failed to read log file:', e);
+  }
+  return [..._logs].reverse();
+};
+
+export const ClearLogs = async (): Promise<void> => {
+  _logs = [];
+  try {
+    const { writeTextFile, BaseDirectory } = await import('@tauri-apps/plugin-fs');
+    await writeTextFile('candy.logs', '', { baseDir: BaseDirectory.AppData });
+  } catch { }
+};
 
 export const ValidateProxyLink = async (link: string): Promise<boolean> =>
   /^(vless|vmess|ss|trojan|wireguard|ikev2|l2tp|dnstt):\/\//.test(link);
@@ -720,4 +806,5 @@ export default {
   LoadSettings, SaveSettings, GetNetworkSpeed,
   LoadLogs, ClearLogs, ValidateProxyLink, CheckSystemExecutables, LoadSavedCredentials,
   IsAdmin, RestartAsAdmin, GenerateSingBoxConfig,
+  handleVpnDisconnected, setupDisconnectListener,
 };

@@ -29,6 +29,7 @@ import {
   Login,
   IsAdmin,
   RestartAsAdmin,
+  setupDisconnectListener,
 } from './services/api';
 import type { ServerInfo, ClientAccount, VPNConfig } from './services/api';
 
@@ -100,6 +101,18 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     if (!isLoggedIn) return;
 
+    let unlistenFn: (() => void) | null = null;
+    const setupListener = async () => {
+      // setupDisconnectListener updates both the api module's internal state
+      // AND our React state, so the polling interval won't overwrite it
+      unlistenFn = await setupDisconnectListener(() => {
+        setIsConnected(false);
+        setIsConnecting(false);
+        setConnectedProtocol(null);
+      });
+    };
+    setupListener();
+
     const checkStatus = async () => {
       try {
         const status = await GetConnectionStatus();
@@ -112,7 +125,12 @@ const AppContent: React.FC = () => {
 
     checkStatus();
     const interval = setInterval(checkStatus, 3000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      if (unlistenFn) {
+        unlistenFn();
+      }
+    };
   }, [isLoggedIn]);
 
   // Refresh account info periodically
@@ -199,16 +217,9 @@ const AppContent: React.FC = () => {
         setConfigsMap(map);
       } catch { }
     } catch (error: any) {
-      // Backward compatibility: if it's not a config id, try connecting by protocol id
-      try {
-        await ConnectToProtocol(configId);
-        setIsConnected(true);
-        setConnectedProtocol(configId);
-      } catch {
-        setConnectionError(error?.message || 'Connection failed');
-        setIsConnected(false);
-        setConnectedProtocol(null);
-      }
+      setConnectionError(error?.message || 'Connection failed');
+      setIsConnected(false);
+      setConnectedProtocol(null);
     } finally {
       setIsConnecting(false);
     }
