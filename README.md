@@ -476,6 +476,27 @@ Contributions are welcome! Please:
 
 ---
 
+## 📋 Roadmap / TODO
+
+These are the features and improvements planned for future releases. Contributions toward any of these are especially welcome!
+
+| Status | Feature | Description |
+|---|---|---|
+| 🔜 | **SSL for Web Panel** | Built-in Let's Encrypt / self-signed SSL support for the admin panel, no manual nginx/caddy setup required |
+| 🔜 | **Xray CDN Configs** | Auto-generate CDN-fronted configs (Cloudflare, ArvanCloud, etc.) for VLESS/VMess over WebSocket with TLS |
+| 🔜 | **Psiphon Protocol** | Integrate Psiphon as a supported tunnel protocol for censorship circumvention |
+| 🔜 | **Auto Tunneling** | Automatic best-protocol selection and fallback — the client tries protocols in order and switches seamlessly if one is blocked |
+| 🔜 | **Paqet Protocol** | Full Paqet protocol support as a tunneling backend |
+| 🔜 | **WARP Protocol** | Cloudflare WARP / WireGuard+WARP integration as a connectable protocol |
+| 🔜 | **iOS Client** | Native iOS client app (Swift/Tauri mobile) connecting to the CandyConnect backend |
+| 🔜 | **Android Client** | Native Android client app connecting to the CandyConnect backend |
+| 🔜 | **SlipStream Protocol** | Complete SlipStream protocol implementation and integration |
+| 🔜 | **TrustTunnel Protocol** | Complete TrustTunnel protocol implementation and integration |
+
+> 💡 Have a feature idea not on this list? Open an issue or pull request — contributions are always welcome!
+
+---
+
 ## 🙏 Acknowledgements & Credits
 
 CandyConnect would not exist without the incredible open-source projects that power it under the hood. Huge respect and gratitude to the teams and communities behind:
