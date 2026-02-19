@@ -1,6 +1,7 @@
 mod sing_box_helper;
 
 use std::fs;
+use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use tauri::{
     menu::{Menu, MenuItem},
@@ -114,7 +115,7 @@ async fn start_vpn(
     use std::thread;
 
     let app_data_dir = app.path().app_data_dir().expect("Failed to get app dir");
-    let resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::env::current_dir().unwrap());
+    let _resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::env::current_dir().unwrap());
     let logs_path = app_data_dir.join("candy.logs");
 
     // 1. Validate and save Xray config
@@ -443,7 +444,7 @@ async fn start_wireguard(
     use crate::sing_box_helper::Config;
 
     let app_data_dir = app.path().app_data_dir().expect("Failed to get app dir");
-    let resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::env::current_dir().unwrap());
+    let _resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::env::current_dir().unwrap());
     let logs_path = app_data_dir.join("candy.logs");
 
     let _ = append_log(&logs_path, "info", &format!(
@@ -651,7 +652,7 @@ async fn start_openvpn(
     use std::thread;
 
     let app_data_dir = app.path().app_data_dir().expect("Failed to get app dir");
-    let resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::env::current_dir().unwrap());
+    let _resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::env::current_dir().unwrap());
     let logs_path = app_data_dir.join("candy.logs");
 
     let _ = append_log(&logs_path, "info", &format!(
@@ -679,7 +680,7 @@ async fn start_openvpn(
     ));
 
     // Resolve openvpn binary: try bundled first, then system
-    let resolve_tool = |base: &std::path::Path, rel_path: &str| -> std::path::PathBuf {
+    let _resolve_tool = |base: &std::path::Path, rel_path: &str| -> std::path::PathBuf {
         let p1 = base.join(rel_path);
         if p1.exists() { return p1; }
         let p2 = base.join("resources").join(rel_path);
@@ -860,7 +861,7 @@ async fn start_dnstt(
     use std::thread;
 
     let app_data_dir = app.path().app_data_dir().expect("Failed to get app dir");
-    let resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::env::current_dir().unwrap());
+    let _resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::env::current_dir().unwrap());
     let logs_path = app_data_dir.join("candy.logs");
 
     // 1. Resolve dnstt-client binary
@@ -1960,7 +1961,7 @@ async fn restart_as_admin(app: tauri::AppHandle) -> Result<(), String> {
         use std::process::Command;
         // Try pkexec for Linux or just sudo for macOS if we have a terminal (usually GUI apps use other ways)
         // For simplicity, we'll try pkexec
-        let status = Command::new("pkexec")
+        let _status = Command::new("pkexec")
             .arg(current_exe)
             .spawn()
             .map_err(|e| e.to_string())?;
