@@ -19,6 +19,19 @@
 
 ---
 
+## 📸 Screenshots
+
+<p align="center">
+  <img src="screenshots/dashboard.png" alt="Web Panel Dashboard" width="48%" />
+  &nbsp;&nbsp;
+  <img src="screenshots/client.png" alt="CandyConnect Desktop Client" width="48%" />
+</p>
+<p align="center">
+  <em>Web Panel Dashboard &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Desktop Client</em>
+</p>
+
+---
+
 ## 🍭 Overview
 
 CandyConnect is an all-in-one VPN server management system that supports multiple VPN protocols from a single control plane, with a web admin panel and a cross-platform desktop client.
