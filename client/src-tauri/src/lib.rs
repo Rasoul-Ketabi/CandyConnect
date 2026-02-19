@@ -1,6 +1,7 @@
 mod sing_box_helper;
 
 use std::fs;
+use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use tauri::{
     menu::{Menu, MenuItem},
@@ -651,6 +652,7 @@ async fn start_openvpn(
     use std::thread;
 
     let app_data_dir = app.path().app_data_dir().expect("Failed to get app dir");
+    #[allow(unused_variables)]
     let resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::env::current_dir().unwrap());
     let logs_path = app_data_dir.join("candy.logs");
 
@@ -679,6 +681,7 @@ async fn start_openvpn(
     ));
 
     // Resolve openvpn binary: try bundled first, then system
+    #[allow(unused_variables)]
     let resolve_tool = |base: &std::path::Path, rel_path: &str| -> std::path::PathBuf {
         let p1 = base.join(rel_path);
         if p1.exists() { return p1; }
