@@ -11,6 +11,9 @@ __pycache__/
 venv/
 *.egg-info/
 
+fix_crlf.py
+prompt.txt
+
 # ── Build Output ──
 dist/
 dist-ssr/
