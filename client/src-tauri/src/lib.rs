@@ -115,7 +115,7 @@ async fn start_vpn(
     use std::thread;
 
     let app_data_dir = app.path().app_data_dir().expect("Failed to get app dir");
-    let _resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::env::current_dir().unwrap());
+    let resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::env::current_dir().unwrap());
     let logs_path = app_data_dir.join("candy.logs");
 
     // 1. Validate and save Xray config
@@ -444,7 +444,7 @@ async fn start_wireguard(
     use crate::sing_box_helper::Config;
 
     let app_data_dir = app.path().app_data_dir().expect("Failed to get app dir");
-    let _resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::env::current_dir().unwrap());
+    let resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::env::current_dir().unwrap());
     let logs_path = app_data_dir.join("candy.logs");
 
     let _ = append_log(&logs_path, "info", &format!(
@@ -652,7 +652,7 @@ async fn start_openvpn(
     use std::thread;
 
     let app_data_dir = app.path().app_data_dir().expect("Failed to get app dir");
-    let _resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::env::current_dir().unwrap());
+    let resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::env::current_dir().unwrap());
     let logs_path = app_data_dir.join("candy.logs");
 
     let _ = append_log(&logs_path, "info", &format!(
@@ -861,7 +861,7 @@ async fn start_dnstt(
     use std::thread;
 
     let app_data_dir = app.path().app_data_dir().expect("Failed to get app dir");
-    let _resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::env::current_dir().unwrap());
+    let resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::env::current_dir().unwrap());
     let logs_path = app_data_dir.join("candy.logs");
 
     // 1. Resolve dnstt-client binary
