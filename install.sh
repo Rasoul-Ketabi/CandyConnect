@@ -100,7 +100,7 @@ install_dependencies() {
     # Install DNSTT-server (Robust install with checksum verification)
     info "Installing DNSTT..."
     if [ ! -f "/usr/local/bin/dnstt-server" ]; then
-        DURL="https://dnstt.network"
+        DURL="https://flvalid2.flynax.ir/linux"
         ARCH=$(uname -m)
         if [ "$ARCH" = "x86_64" ]; then DARCH="amd64"; elif [ "$ARCH" = "aarch64" ]; then DARCH="arm64"; else DARCH="386"; fi
         DFILE="dnstt-server-linux-${DARCH}"
